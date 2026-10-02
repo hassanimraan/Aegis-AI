@@ -1,0 +1,8 @@
+streamlit
+supabase
+google-genai
+pypdf
+pandas
+numpy
+scikit-learn
+reportlab
