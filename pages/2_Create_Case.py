@@ -69,11 +69,15 @@ def reset_case_review(case_id):
     """
 
     try:
+
         (
             supabase
             .table("ai_review_steps")
             .delete()
-            .eq("case_id", case_id)
+            .eq(
+                "case_id",
+                case_id
+            )
             .execute()
         )
 
@@ -81,7 +85,10 @@ def reset_case_review(case_id):
             supabase
             .table("ai_reviews")
             .delete()
-            .eq("case_id", case_id)
+            .eq(
+                "case_id",
+                case_id
+            )
             .execute()
         )
 
@@ -89,70 +96,67 @@ def reset_case_review(case_id):
 
         return True
 
-```
-except Exception as error:
+    except Exception as error:
 
-    st.error(
-        f"Unable to reset the AI review: {error}"
-    )
-    return False
-```
-
-def record_evidence_change(
-case_id,
-user_id,
-action,
-document_name,
-document_type=None,
-):
-"""
-Record that case evidence changed.
-
-```
-This audit event is used to determine whether a previous
-human decision is still applicable to the current evidence.
-"""
-
-try:
-
-    details = (
-        f"Case evidence changed. "
-        f"Action: {action}. "
-        f"Document: {document_name or 'Unknown'}."
-    )
-
-    if document_type:
-
-        details += (
-            f" Document Type: {document_type}."
+        st.error(
+            f"Unable to reset the AI review: {error}"
         )
 
-    response = (
-        supabase
-        .table("audit_logs")
-        .insert({
-            "case_id": case_id,
-            "user_id": user_id,
-            "action": "EVIDENCE_CHANGED",
-            "details": details,
-        })
-        .execute()
-    )
+        return False
 
-    return bool(response.data)
 
-except Exception as error:
+def record_evidence_change(
+    case_id,
+    user_id,
+    action,
+    document_name,
+    document_type=None,
+):
+    """
+    Records that case evidence changed.
 
-    st.error(
-        f"Unable to record evidence change in the audit trail: "
-        f"{error}"
-    )
+    This audit event is used to determine whether a previous
+    human decision is still applicable to the current evidence.
+    """
 
-    return False
-```
+    try:
+
+        details = (
+            f"Case evidence changed. "
+            f"Action: {action}. "
+            f"Document: {document_name or 'Unknown'}."
+        )
+
+        if document_type:
+
+            details += (
+                f" Document Type: {document_type}."
+            )
+
+        response = (
+            supabase
+            .table("audit_logs")
+            .insert({
+                "case_id": case_id,
+                "user_id": user_id,
+                "action": "EVIDENCE_CHANGED",
+                "details": details,
+            })
+            .execute()
+        )
+
+        return bool(response.data)
+
+    except Exception as error:
+
+        st.error(
+            f"Unable to record evidence-change audit event: {error}"
+        )
+
+        return False
+
 
 def get_review_steps(case_id):
-
     """
     Load persistent AI workflow checkpoints.
     """
@@ -163,8 +167,13 @@ def get_review_steps(case_id):
             supabase
             .table("ai_review_steps")
             .select("*")
-            .eq("case_id", case_id)
-            .order("step_order")
+            .eq(
+                "case_id",
+                case_id
+            )
+            .order(
+                "step_order"
+            )
             .execute()
         )
 
@@ -178,13 +187,16 @@ def get_review_steps(case_id):
 def step_status_map(case_id):
     """
     Convert checkpoint records into:
+
         {
             "RAG": {...},
             "COMPLIANCE": {...}
         }
     """
 
-    records = get_review_steps(case_id)
+    records = get_review_steps(
+        case_id
+    )
 
     return {
         record.get("step_name"): record
@@ -197,26 +209,40 @@ def display_review_progress(case_id):
     Display the persistent six-step AI workflow.
     """
 
-    st.subheader("AI Review Progress")
+    st.subheader(
+        "AI Review Progress"
+    )
 
-    steps = step_status_map(case_id)
+    steps = step_status_map(
+        case_id
+    )
 
     completed_count = sum(
         1
         for step_name, _ in REVIEW_STEPS
-        if steps.get(step_name, {}).get("status") == "COMPLETED"
+        if steps.get(
+            step_name,
+            {}
+        ).get("status") == "COMPLETED"
     )
 
-    progress_value = completed_count / len(REVIEW_STEPS)
+    progress_value = (
+        completed_count / len(REVIEW_STEPS)
+    )
 
     st.progress(
         progress_value,
-        text=f"{completed_count}/{len(REVIEW_STEPS)} steps completed"
+        text=(
+            f"{completed_count}/"
+            f"{len(REVIEW_STEPS)} steps completed"
+        )
     )
 
     for step_name, display_name in REVIEW_STEPS:
 
-        record = steps.get(step_name)
+        record = steps.get(
+            step_name
+        )
 
         if not record:
 
@@ -244,7 +270,10 @@ def display_review_progress(case_id):
             provider_text = ""
 
             if provider:
-                provider_text = f" | Provider: {provider}"
+
+                provider_text = (
+                    f" | Provider: {provider}"
+                )
 
             st.success(
                 f"🟢 {display_name} — Completed"
@@ -268,6 +297,7 @@ def display_review_progress(case_id):
             )
 
             if error_text:
+
                 st.caption(
                     f"Error: {error_text}"
                 )
@@ -278,7 +308,10 @@ def display_review_progress(case_id):
                 f"⚪ {display_name} — Pending"
             )
 
-        if model and status == "COMPLETED":
+        if (
+            model
+            and status == "COMPLETED"
+        ):
 
             st.caption(
                 f"Model: {model}"
@@ -287,11 +320,15 @@ def display_review_progress(case_id):
 
 def extract_review_text(result):
     """
-    Agents now return a router result dictionary.
+    Agents return a router result dictionary.
+
     This helper extracts the actual analysis text.
     """
 
-    if isinstance(result, dict):
+    if isinstance(
+        result,
+        dict
+    ):
 
         return result.get(
             "text",
@@ -309,7 +346,9 @@ def extract_review_text(result):
 # HEADER
 # =========================================================
 
-st.title("📝 Create Approval Case")
+st.title(
+    "📝 Create Approval Case"
+)
 
 st.write(
     "Create a procurement or capital expenditure "
@@ -323,13 +362,19 @@ st.divider()
 # 1. CREATE CASE
 # =========================================================
 
-st.subheader("1. Request Information")
+st.subheader(
+    "1. Request Information"
+)
 
-with st.form("create_case_form"):
+with st.form(
+    "create_case_form"
+):
 
     title = st.text_input(
         "Request Title",
-        placeholder="e.g. Industrial Testing Equipment Procurement"
+        placeholder=(
+            "e.g. Industrial Testing Equipment Procurement"
+        )
     )
 
     department = st.selectbox(
@@ -346,7 +391,9 @@ with st.form("create_case_form"):
 
     requester = st.text_input(
         "Requester",
-        placeholder="e.g. Engr. Ahmed Raza, Manager Engineering"
+        placeholder=(
+            "e.g. Engr. Ahmed Raza, Manager Engineering"
+        )
     )
 
     amount = st.number_input(
@@ -581,69 +628,66 @@ if "current_case_id" in st.session_state:
                     .execute()
                 )
 
-```
-            if response.data:
+                if response.data:
 
-                # -------------------------------------------------
-                # Evidence has changed.
-                # Existing AI analysis is no longer valid.
-                # -------------------------------------------------
+                    # -------------------------------------------------
+                    # Evidence has changed.
+                    # Existing AI analysis is no longer valid.
+                    # -------------------------------------------------
 
-                audit_recorded = record_evidence_change(
-                    case_id=case_id,
-                    user_id=user.id,
-                    action="DOCUMENT_UPLOADED",
-                    document_name=uploaded_file.name,
-                    document_type=document_type,
-                )
-
-                review_reset = reset_case_review(
-                    case_id
-                )
-
-                if review_reset:
-
-                    st.success(
-                        f"{uploaded_file.name} uploaded successfully."
+                    audit_recorded = record_evidence_change(
+                        case_id=case_id,
+                        user_id=user.id,
+                        action="DOCUMENT_UPLOADED",
+                        document_name=uploaded_file.name,
+                        document_type=document_type,
                     )
 
-                    st.info(
-                        f"Extracted approximately "
-                        f"{len(extracted_text):,} characters."
+                    review_reset = reset_case_review(
+                        case_id
                     )
 
-                    st.info(
-                        "Previous AI analysis was cleared because "
-                        "the case evidence changed. A new review "
-                        "will start from the beginning."
-                    )
+                    if review_reset:
 
-                    if not audit_recorded:
-
-                        st.warning(
-                            "The evidence-change audit event could "
-                            "not be recorded. Please check the "
-                            "audit log before proceeding."
+                        st.success(
+                            f"{uploaded_file.name} uploaded successfully."
                         )
 
-                    st.rerun()
+                        st.info(
+                            f"Extracted approximately "
+                            f"{len(extracted_text):,} characters."
+                        )
+
+                        st.info(
+                            "Previous AI analysis was cleared because "
+                            "the case evidence changed. A new review "
+                            "will start from the beginning."
+                        )
+
+                        if not audit_recorded:
+
+                            st.warning(
+                                "The evidence-change audit event could "
+                                "not be recorded. Please check the "
+                                "audit log before proceeding."
+                            )
+
+                        st.rerun()
+
+                    else:
+
+                        st.error(
+                            "The document was uploaded, but the previous "
+                            "AI review could not be cleared. Please do "
+                            "not make a human decision until the AI "
+                            "review is successfully restarted."
+                        )
 
                 else:
 
                     st.error(
-                        "The document was uploaded, but the previous "
-                        "AI review could not be cleared. Please do "
-                        "not make a human decision until the AI "
-                        "review is successfully restarted."
+                        "Document could not be saved."
                     )
-
-            else:
-
-                st.error(
-                    "Document could not be saved."
-                )
-```
-
 
             except Exception as error:
 
@@ -668,8 +712,13 @@ if "current_case_id" in st.session_state:
             supabase
             .table("documents")
             .select("*")
-            .eq("case_id", case_id)
-            .order("created_at")
+            .eq(
+                "case_id",
+                case_id
+            )
+            .order(
+                "created_at"
+            )
             .execute()
         )
 
@@ -735,66 +784,81 @@ if "current_case_id" in st.session_state:
                                 .execute()
                             )
 
-```
-                        if delete_response.data:
+                            if delete_response.data:
 
-                            # -------------------------------------------------
-                            # Evidence has changed.
-                            # Existing AI analysis is no longer valid.
-                            # -------------------------------------------------
+                                # -------------------------------------------------
+                                # Evidence has changed.
+                                # Existing AI analysis is no longer valid.
+                                # -------------------------------------------------
 
-                            audit_recorded = record_evidence_change(
-                                case_id=case_id,
-                                user_id=user.id,
-                                action="DOCUMENT_REMOVED",
-                                document_name=document_name,
-                                document_type=document_type_value,
-                            )
-
-                            review_reset = reset_case_review(
-                                case_id
-                            )
-
-                            if review_reset:
-
-                                st.success(
-                                    f"{document_name} removed successfully."
+                                audit_recorded = record_evidence_change(
+                                    case_id=case_id,
+                                    user_id=user.id,
+                                    action="DOCUMENT_REMOVED",
+                                    document_name=document_name,
+                                    document_type=document_type_value,
                                 )
 
-                                st.info(
-                                    "Previous AI analysis was cleared "
-                                    "because the case evidence changed. "
-                                    "A new review is required."
+                                review_reset = reset_case_review(
+                                    case_id
                                 )
 
-                                if not audit_recorded:
+                                if review_reset:
 
-                                    st.warning(
-                                        "The evidence-change audit event "
-                                        "could not be recorded. Please "
-                                        "check the audit log before "
-                                        "proceeding."
+                                    st.success(
+                                        f"{document_name} removed successfully."
                                     )
 
-                                st.rerun()
+                                    st.info(
+                                        "Previous AI analysis was cleared "
+                                        "because the case evidence changed. "
+                                        "A new review is required."
+                                    )
+
+                                    if not audit_recorded:
+
+                                        st.warning(
+                                            "The evidence-change audit event "
+                                            "could not be recorded. Please "
+                                            "check the audit log before "
+                                            "proceeding."
+                                        )
+
+                                    st.rerun()
+
+                                else:
+
+                                    st.error(
+                                        "The document was removed, but the "
+                                        "previous AI review could not be "
+                                        "cleared. Please do not make a human "
+                                        "decision until the AI review is "
+                                        "successfully restarted."
+                                    )
 
                             else:
 
-                                st.error(
-                                    "The document was removed, but the "
-                                    "previous AI review could not be "
-                                    "cleared. Please do not make a human "
-                                    "decision until the AI review is "
-                                    "successfully restarted."
+                                st.warning(
+                                    "Document could not be removed."
                                 )
 
-                        else:
+                        except Exception as error:
 
-                            st.warning(
-                                "Document could not be removed."
+                            st.error(
+                                f"Error removing document: {error}"
                             )
-```
 
+        else:
+
+            st.info(
+                "No documents uploaded yet."
+            )
+
+    except Exception as error:
+
+        st.error(
+            f"Unable to load documents: {error}"
+        )
 
 
     # =====================================================
@@ -923,7 +987,9 @@ if "current_case_id" in st.session_state:
                     "case_id",
                     case_id
                 )
-                .order("created_at")
+                .order(
+                    "created_at"
+                )
                 .execute()
             )
 
@@ -990,66 +1056,70 @@ if "current_case_id" in st.session_state:
             )
 
 
-# ---------------------------------------------
-# SAVE FINAL AI REVIEW
-# ---------------------------------------------
-#
-# Create the new complete review first.
-# Then remove older review records for this case.
-# This prevents duplicate ai_reviews when the user
-# presses Run / Resume again after completion.
-#
-ai_review_response = (
-    supabase
-    .table("ai_reviews")
-    .insert({
-        "case_id": case_id,
+            # ---------------------------------------------
+            # SAVE FINAL AI REVIEW
+            # ---------------------------------------------
+            #
+            # Create the new complete review first.
+            # Then remove older review records for this case.
+            # This prevents duplicate ai_reviews when the user
+            # presses Run / Resume again after completion.
+            #
 
-        "compliance_result": compliance_text,
+            ai_review_response = (
+                supabase
+                .table("ai_reviews")
+                .insert({
+                    "case_id": case_id,
 
-        "financial_result": financial_text,
+                    "compliance_result": compliance_text,
 
-        "risk_result": risk_text,
+                    "financial_result": financial_text,
 
-        "synthesis": synthesis_text,
+                    "risk_result": risk_text,
 
-        "recommendation": synthesis_text,
+                    "synthesis": synthesis_text,
 
-        "requirements": review.get(
-            "requirements",
-            []
-        ),
+                    "recommendation": synthesis_text,
 
-        "evidence_gate": review.get(
-            "evidence_gate",
-            {}
-        )
-    })
-    .execute()
-)
+                    "requirements": review.get(
+                        "requirements",
+                        []
+                    ),
 
-if ai_review_response.data:
-
-    new_review_id = ai_review_response.data[0].get(
-        "id"
-    )
-
-    if new_review_id:
-
-        (
-            supabase
-            .table("ai_reviews")
-            .delete()
-            .eq(
-                "case_id",
-                case_id
+                    "evidence_gate": review.get(
+                        "evidence_gate",
+                        {}
+                    )
+                })
+                .execute()
             )
-            .neq(
-                "id",
-                new_review_id
-            )
-            .execute()
-        )
+
+            if ai_review_response.data:
+
+                new_review_id = (
+                    ai_review_response.data[0].get(
+                        "id"
+                    )
+                )
+
+                if new_review_id:
+
+                    (
+                        supabase
+                        .table("ai_reviews")
+                        .delete()
+                        .eq(
+                            "case_id",
+                            case_id
+                        )
+                        .neq(
+                            "id",
+                            new_review_id
+                        )
+                        .execute()
+                    )
+
 
             # ---------------------------------------------
             # FINAL CHECK
