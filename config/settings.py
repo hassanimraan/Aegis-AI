@@ -11,3 +11,11 @@ def get_supabase_key():
 
 def get_gemini_api_key():
     return st.secrets["GEMINI_API_KEY"]
+
+
+def get_groq_api_key():
+    return st.secrets["GROQ_API_KEY"]
+
+
+def get_openrouter_api_key():
+    return st.secrets["OPENROUTER_API_KEY"]
