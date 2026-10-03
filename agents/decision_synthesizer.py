@@ -1,9 +1,4 @@
-from google import genai
-
-from config.settings import get_gemini_api_key
-
-
-MODEL = "gemini-3.5-flash"
+from services.llm_router import generate_with_fallback
 
 
 def run_decision_synthesizer(
@@ -12,10 +7,6 @@ def run_decision_synthesizer(
     financial_result,
     risk_result
 ):
-    client = genai.Client(
-        api_key=get_gemini_api_key()
-    )
-
     prompt = f"""
 You are the Decision Synthesizer in AegisAI,
 an AI-powered procurement approval and compliance system.
@@ -150,9 +141,4 @@ Do not state that the case is finally approved, rejected,
 or returned by the system.
 """
 
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=prompt
-    )
-
-    return response.text
+    return generate_with_fallback(prompt)
