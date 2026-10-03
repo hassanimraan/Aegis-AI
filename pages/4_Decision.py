@@ -861,11 +861,11 @@ nav_left, nav_right = st.columns([1, 1])
 
 with nav_left:
     if st.button(
-        "← Create Case",
+        "← Case Review",
         use_container_width=True,
-        key="decision_previous"
+        key="Review_previous"
     ):
-        st.switch_page("pages/2_Create_Case.py")
+        st.switch_page("pages/3_Case_Review.py")
 
 with nav_right:
     if st.button(
