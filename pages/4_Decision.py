@@ -34,6 +34,50 @@ if (
     st.stop()
 
 
+# ---------------------------------------------------------
+# Page Navigation Helper
+# ---------------------------------------------------------
+
+def show_page_navigation(
+    previous_key,
+    next_key
+):
+
+    st.divider()
+
+    nav_left, nav_right = st.columns(
+        [1, 1]
+    )
+
+    with nav_left:
+
+        if st.button(
+            "← Case Review",
+            use_container_width=True,
+            key=previous_key
+        ):
+
+            st.switch_page(
+                "pages/3_Case_Review.py"
+            )
+
+    with nav_right:
+
+        if st.button(
+            "Next: Case History →",
+            use_container_width=True,
+            key=next_key
+        ):
+
+            st.switch_page(
+                "pages/5_Case_History.py"
+            )
+
+
+# ---------------------------------------------------------
+# Header
+# ---------------------------------------------------------
+
 st.title("⚖️ Human Review & Decision")
 
 st.write(
@@ -56,6 +100,11 @@ except Exception as e:
 
     st.error(
         f"Unable to connect to Supabase: {e}"
+    )
+
+    show_page_navigation(
+        "decision_previous_db_error",
+        "decision_next_db_error"
     )
 
     st.stop()
@@ -90,8 +139,17 @@ except Exception as e:
         f"Unable to load cases: {e}"
     )
 
+    show_page_navigation(
+        "decision_previous_cases_error",
+        "decision_next_cases_error"
+    )
+
     st.stop()
 
+
+# ---------------------------------------------------------
+# No Cases
+# ---------------------------------------------------------
 
 if not cases:
 
@@ -99,8 +157,17 @@ if not cases:
         "No approval cases are available for human review."
     )
 
+    show_page_navigation(
+        "decision_previous_no_cases",
+        "decision_next_no_cases"
+    )
+
     st.stop()
 
+
+# ---------------------------------------------------------
+# Case Selection
+# ---------------------------------------------------------
 
 case_options = {
     f"{case['title']} — PKR {float(case['amount']):,.0f}": case
@@ -160,9 +227,13 @@ if st.session_state.get(
     "decision_chat_case_id"
 ) != current_case_id:
 
-    st.session_state["decision_chat_case_id"] = current_case_id
+    st.session_state[
+        "decision_chat_case_id"
+    ] = current_case_id
 
-    st.session_state["decision_chat_messages"] = []
+    st.session_state[
+        "decision_chat_messages"
+    ] = []
 
 
 # ---------------------------------------------------------
@@ -193,7 +264,9 @@ try:
 
         latest_review = reviews[0]
 
-        st.session_state["ai_case_review_db"] = latest_review
+        st.session_state[
+            "ai_case_review_db"
+        ] = latest_review
 
 except Exception as e:
 
@@ -201,8 +274,17 @@ except Exception as e:
         f"Unable to load AI review: {e}"
     )
 
+    show_page_navigation(
+        "decision_previous_review_error",
+        "decision_next_review_error"
+    )
+
     st.stop()
 
+
+# ---------------------------------------------------------
+# No AI Review
+# ---------------------------------------------------------
 
 if not reviews:
 
@@ -213,6 +295,15 @@ if not reviews:
     st.info(
         "This case must complete the AI review workflow "
         "before a human final decision can be recorded."
+    )
+
+    # -----------------------------------------------------
+    # Navigation MUST appear before st.stop()
+    # -----------------------------------------------------
+
+    show_page_navigation(
+        "decision_previous_no_review",
+        "decision_next_no_review"
     )
 
     st.stop()
@@ -317,7 +408,10 @@ for message in st.session_state.get(
 
 question = st.text_input(
     "Ask a question",
-    placeholder="Why does this case require three vendor quotations?",
+    placeholder=(
+        "Why does this case require "
+        "three vendor quotations?"
+    ),
     key="decision_chat_input"
 )
 
@@ -359,7 +453,6 @@ if send_question and question.strip():
             top_k=6
         )
 
-
         policy_text = "\n\n".join(
             [
                 f"{item['policy_id']} — "
@@ -380,7 +473,8 @@ if send_question and question.strip():
             [
                 f"DOCUMENT: {doc['document_name']}\n"
                 f"TYPE: {doc['document_type']}\n"
-                f"CONTENT:\n{doc.get('extracted_text', '')}"
+                f"CONTENT:\n"
+                f"{doc.get('extracted_text', '')}"
                 for doc in documents
             ]
         )
@@ -537,31 +631,15 @@ Do not provide a final human decision.
         )
 
 
-st.divider()
-
 # ---------------------------------------------------------
 # PAGE NAVIGATION
 # ---------------------------------------------------------
 
-st.divider()
+show_page_navigation(
+    "decision_previous",
+    "decision_next"
+)
 
-nav_left, nav_right = st.columns([1, 1])
-
-with nav_left:
-    if st.button(
-        "← Case Review",
-        use_container_width=True,
-        key="Review_previous"
-    ):
-        st.switch_page("pages/3_Case_Review.py")
-
-with nav_right:
-    if st.button(
-        "Next: Case History →",
-        use_container_width=True,
-        key="decision_next"
-    ):
-        st.switch_page("pages/5_Case_History.py")
 
 # ---------------------------------------------------------
 # Human Final Decision
@@ -655,8 +733,6 @@ else:
         "evidence_gate"
     )
 
-    # Supabase may return JSONB as a dictionary.
-    # Handle string JSON safely as well.
     if isinstance(gate, str):
 
         try:
@@ -786,25 +862,27 @@ else:
 
         try:
 
-            # -------------------------------------------------
+            # ---------------------------------------------
             # Save Human Decision
-            # -------------------------------------------------
+            # ---------------------------------------------
 
             supabase.table(
                 "decisions"
             ).insert(
                 {
                     "case_id": current_case_id,
-                    "reviewer_id": st.session_state["user"].id,
+                    "reviewer_id": (
+                        st.session_state["user"].id
+                    ),
                     "decision": decision,
                     "comments": comments.strip()
                 }
             ).execute()
 
 
-            # -------------------------------------------------
+            # ---------------------------------------------
             # Update Case Status
-            # -------------------------------------------------
+            # ---------------------------------------------
 
             status_map = {
                 "Approve": "APPROVED",
@@ -829,16 +907,18 @@ else:
             ).execute()
 
 
-            # -------------------------------------------------
+            # ---------------------------------------------
             # Create Audit Log
-            # -------------------------------------------------
+            # ---------------------------------------------
 
             supabase.table(
                 "audit_logs"
             ).insert(
                 {
                     "case_id": current_case_id,
-                    "user_id": st.session_state["user"].id,
+                    "user_id": (
+                        st.session_state["user"].id
+                    ),
                     "action": (
                         f"HUMAN_DECISION_"
                         f"{decision.upper()}"
@@ -853,9 +933,9 @@ else:
             ).execute()
 
 
-            # -------------------------------------------------
+            # ---------------------------------------------
             # Confirmation
-            # -------------------------------------------------
+            # ---------------------------------------------
 
             st.success(
                 f"✅ Human decision saved successfully: "
