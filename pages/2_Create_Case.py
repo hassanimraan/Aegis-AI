@@ -89,16 +89,70 @@ def reset_case_review(case_id):
 
         return True
 
-    except Exception as error:
+```
+except Exception as error:
 
-        st.error(
-            f"Unable to reset the AI review: {error}"
+    st.error(
+        f"Unable to reset the AI review: {error}"
+    )
+    return False
+```
+
+def record_evidence_change(
+case_id,
+user_id,
+action,
+document_name,
+document_type=None,
+):
+"""
+Record that case evidence changed.
+
+```
+This audit event is used to determine whether a previous
+human decision is still applicable to the current evidence.
+"""
+
+try:
+
+    details = (
+        f"Case evidence changed. "
+        f"Action: {action}. "
+        f"Document: {document_name or 'Unknown'}."
+    )
+
+    if document_type:
+
+        details += (
+            f" Document Type: {document_type}."
         )
 
-        return False
+    response = (
+        supabase
+        .table("audit_logs")
+        .insert({
+            "case_id": case_id,
+            "user_id": user_id,
+            "action": "EVIDENCE_CHANGED",
+            "details": details,
+        })
+        .execute()
+    )
 
+    return bool(response.data)
+
+except Exception as error:
+
+    st.error(
+        f"Unable to record evidence change in the audit trail: "
+        f"{error}"
+    )
+
+    return False
+```
 
 def get_review_steps(case_id):
+
     """
     Load persistent AI workflow checkpoints.
     """
@@ -527,34 +581,69 @@ if "current_case_id" in st.session_state:
                     .execute()
                 )
 
-                if response.data:
+```
+            if response.data:
 
-                    # Evidence has changed.
-                    # Existing AI analysis is no longer valid.
-                    if reset_case_review(case_id):
+                # -------------------------------------------------
+                # Evidence has changed.
+                # Existing AI analysis is no longer valid.
+                # -------------------------------------------------
 
-                        st.success(
-                            f"{uploaded_file.name} uploaded successfully."
+                audit_recorded = record_evidence_change(
+                    case_id=case_id,
+                    user_id=user.id,
+                    action="DOCUMENT_UPLOADED",
+                    document_name=uploaded_file.name,
+                    document_type=document_type,
+                )
+
+                review_reset = reset_case_review(
+                    case_id
+                )
+
+                if review_reset:
+
+                    st.success(
+                        f"{uploaded_file.name} uploaded successfully."
+                    )
+
+                    st.info(
+                        f"Extracted approximately "
+                        f"{len(extracted_text):,} characters."
+                    )
+
+                    st.info(
+                        "Previous AI analysis was cleared because "
+                        "the case evidence changed. A new review "
+                        "will start from the beginning."
+                    )
+
+                    if not audit_recorded:
+
+                        st.warning(
+                            "The evidence-change audit event could "
+                            "not be recorded. Please check the "
+                            "audit log before proceeding."
                         )
 
-                        st.info(
-                            f"Extracted approximately "
-                            f"{len(extracted_text):,} characters."
-                        )
-
-                        st.info(
-                            "Previous AI analysis was cleared because "
-                            "the case evidence changed. A new review "
-                            "will start from the beginning."
-                        )
-
-                        st.rerun()
+                    st.rerun()
 
                 else:
 
                     st.error(
-                        "Document could not be saved."
+                        "The document was uploaded, but the previous "
+                        "AI review could not be cleared. Please do "
+                        "not make a human decision until the AI "
+                        "review is successfully restarted."
                     )
+
+            else:
+
+                st.error(
+                    "Document could not be saved."
+                )
+```
+
 
             except Exception as error:
 
@@ -646,46 +735,66 @@ if "current_case_id" in st.session_state:
                                 .execute()
                             )
 
-                            if delete_response.data:
+```
+                        if delete_response.data:
 
-                                if reset_case_review(
-                                    case_id
-                                ):
+                            # -------------------------------------------------
+                            # Evidence has changed.
+                            # Existing AI analysis is no longer valid.
+                            # -------------------------------------------------
 
-                                    st.success(
-                                        f"{document_name} removed successfully."
+                            audit_recorded = record_evidence_change(
+                                case_id=case_id,
+                                user_id=user.id,
+                                action="DOCUMENT_REMOVED",
+                                document_name=document_name,
+                                document_type=document_type_value,
+                            )
+
+                            review_reset = reset_case_review(
+                                case_id
+                            )
+
+                            if review_reset:
+
+                                st.success(
+                                    f"{document_name} removed successfully."
+                                )
+
+                                st.info(
+                                    "Previous AI analysis was cleared "
+                                    "because the case evidence changed. "
+                                    "A new review is required."
+                                )
+
+                                if not audit_recorded:
+
+                                    st.warning(
+                                        "The evidence-change audit event "
+                                        "could not be recorded. Please "
+                                        "check the audit log before "
+                                        "proceeding."
                                     )
 
-                                    st.info(
-                                        "Previous AI analysis was cleared "
-                                        "because the case evidence changed."
-                                    )
-
-                                    st.rerun()
+                                st.rerun()
 
                             else:
 
-                                st.warning(
-                                    "Document could not be removed."
+                                st.error(
+                                    "The document was removed, but the "
+                                    "previous AI review could not be "
+                                    "cleared. Please do not make a human "
+                                    "decision until the AI review is "
+                                    "successfully restarted."
                                 )
 
-                        except Exception as error:
+                        else:
 
-                            st.error(
-                                f"Unable to remove document: {error}"
+                            st.warning(
+                                "Document could not be removed."
                             )
+```
 
-        else:
-
-            st.info(
-                "No documents uploaded yet."
-            )
-
-    except Exception as error:
-
-        st.error(
-            f"Unable to load documents: {error}"
-        )
 
 
     # =====================================================
