@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 import streamlit as st
 
@@ -27,7 +28,104 @@ if (
     )
     st.stop()
 
+def parse_timestamp(value):
+    """
+    Convert a Supabase timestamp into a timezone-aware datetime.
+    """
 
+    if not value:
+        return None
+
+    try:
+
+        timestamp = datetime.fromisoformat(
+            str(value).replace(
+                "Z",
+                "+00:00"
+            )
+        )
+
+        if timestamp.tzinfo is None:
+
+            timestamp = timestamp.replace(
+                tzinfo=timezone.utc
+            )
+
+        return timestamp
+
+    except Exception:
+
+        return None
+
+
+def load_latest_evidence_change(case_id):
+    """
+    Load the most recent evidence-change audit event.
+    """
+
+    try:
+
+        response = (
+            supabase
+            .table("audit_logs")
+            .select(
+                "id, action, details, created_at"
+            )
+            .eq(
+                "case_id",
+                case_id
+            )
+            .eq(
+                "action",
+                "EVIDENCE_CHANGED"
+            )
+            .order(
+                "created_at",
+                desc=True
+            )
+            .limit(1)
+            .execute()
+        )
+
+        records = response.data or []
+
+        if records:
+
+            return records[0]
+
+    except Exception:
+
+        pass
+
+    return None
+
+
+def decision_is_superseded(
+    decision,
+    evidence_change
+):
+    """
+    A decision is superseded when evidence changed after
+    that decision was recorded.
+    """
+
+    if not decision or not evidence_change:
+
+        return False
+
+    decision_time = parse_timestamp(
+        decision.get("created_at")
+    )
+
+    evidence_change_time = parse_timestamp(
+        evidence_change.get("created_at")
+    )
+
+    if not decision_time or not evidence_change_time:
+
+        return False
+
+    return evidence_change_time > decision_time
 # ---------------------------------------------------------
 # Page Navigation Helper
 # ---------------------------------------------------------
@@ -704,13 +802,12 @@ try:
         )
         .eq(
             "case_id",
-            current_case_id,
+            current_case_id
         )
         .order(
             "created_at",
-            desc=True,
+            desc=True
         )
-        .limit(1)
         .execute()
     )
 
@@ -728,15 +825,45 @@ except Exception as e:
 
 
 # ---------------------------------------------------------
+# Load Latest Evidence Change
+# ---------------------------------------------------------
+
+latest_evidence_change = (
+    load_latest_evidence_change(
+        current_case_id
+    )
+)
+
+
+# ---------------------------------------------------------
+# Determine Whether Existing Decision Is Superseded
+# ---------------------------------------------------------
+
+previous_decision = (
+    existing_decisions[0]
+    if existing_decisions
+    else None
+)
+
+previous_decision_superseded = (
+    decision_is_superseded(
+        previous_decision,
+        latest_evidence_change
+    )
+)
+
+
+# ---------------------------------------------------------
 # Existing Final Decision
 # ---------------------------------------------------------
 
-if existing_decisions:
-
-    previous_decision = existing_decisions[0]
+if (
+    previous_decision
+    and not previous_decision_superseded
+):
 
     st.success(
-        "✅ Final decision already recorded: "
+        "✅ Current final decision: "
         f"{previous_decision.get('decision', 'N/A')}"
     )
 
@@ -751,8 +878,48 @@ if existing_decisions:
     )
 
     st.info(
-        "This case has already received a final human decision. "
-        "A second final decision cannot be submitted."
+        "This case currently has an active human final decision."
+    )
+
+
+# ---------------------------------------------------------
+# Previous Decision Has Been Superseded
+# ---------------------------------------------------------
+
+elif (
+    previous_decision
+    and previous_decision_superseded
+):
+
+    st.warning(
+        "⚠️ Previous human decision is SUPERSEDED."
+    )
+
+    st.write(
+        "**Previous Decision:** "
+        f"{previous_decision.get('decision', 'N/A')}"
+    )
+
+    st.write(
+        "**Previous Decision Date:** "
+        f"{previous_decision.get('created_at', 'N/A')}"
+    )
+
+    st.write(
+        "**Previous Reviewer Comments:** "
+        f"{previous_decision.get('comments') or 'None'}"
+    )
+
+    st.info(
+        "Case evidence changed after the previous human "
+        "decision. The previous decision remains in the "
+        "audit/history record but no longer applies to the "
+        "current evidence."
+    )
+
+    st.warning(
+        "A new AI review must be completed before a new "
+        "human decision can be submitted."
     )
 
 
@@ -760,36 +927,61 @@ if existing_decisions:
 # New Human Decision
 # ---------------------------------------------------------
 
-else:
+if (
+    not previous_decision
+    or previous_decision_superseded
+):
 
-    if not gate.get("complete", False):
+    if not gate.get(
+        "complete",
+        False
+    ):
 
         st.error(
             "🔴 FINAL DECISION LOCKED"
         )
 
-        st.warning(
-            "Mandatory policy-required evidence is incomplete. "
-            "Please upload the missing evidence and run AI "
-            "Case Review again before making the final decision."
-        )
+        if previous_decision_superseded:
 
-        st.subheader("📋 Missing Evidence")
+            st.warning(
+                "The previous decision was superseded because "
+                "case evidence changed. The updated evidence "
+                "must pass the AI Evidence Gate before a new "
+                "human decision can be made."
+            )
+
+        else:
+
+            st.warning(
+                "Mandatory policy-required evidence is incomplete. "
+                "Please upload the missing evidence and run AI "
+                "Case Review again before making the final decision."
+            )
+
+        st.subheader(
+            "📋 Missing Evidence"
+        )
 
         missing = gate.get(
             "missing",
-            [],
+            []
         )
 
-        if isinstance(missing, list) and missing:
+        if (
+            isinstance(missing, list)
+            and missing
+        ):
 
             for item in missing:
 
                 st.write(
-                    f"❌ **{item.get('name', 'Requirement')}**"
+                    f"❌ **"
+                    f"{item.get('name', 'Requirement')}"
+                    f"**"
                 )
 
                 if item.get("reason"):
+
                     st.caption(
                         item["reason"]
                     )
@@ -820,7 +1012,6 @@ else:
             key="human_decision_choice",
         )
 
-
         comments = st.text_area(
             "Reviewer Comments",
             placeholder=(
@@ -828,7 +1019,6 @@ else:
             ),
             key="human_decision_comments",
         )
-
 
         if decision in [
             "Return",
@@ -839,7 +1029,6 @@ else:
                 "Reviewer comments are required for "
                 "Return or Reject."
             )
-
 
         # -------------------------------------------------
         # Submit Decision
@@ -866,7 +1055,7 @@ else:
                 try:
 
                     # -------------------------------------
-                    # Save Human Decision
+                    # Save New Human Decision
                     # -------------------------------------
 
                     supabase.table(
@@ -884,7 +1073,6 @@ else:
                         }
                     ).execute()
 
-
                     # -------------------------------------
                     # Update Case Status
                     # -------------------------------------
@@ -899,7 +1087,6 @@ else:
                         decision
                     ]
 
-
                     supabase.table(
                         "cases"
                     ).update(
@@ -910,7 +1097,6 @@ else:
                         "id",
                         current_case_id,
                     ).execute()
-
 
                     # -------------------------------------
                     # Audit Log
@@ -939,7 +1125,6 @@ else:
                         }
                     ).execute()
 
-
                     # -------------------------------------
                     # Confirmation
                     # -------------------------------------
@@ -955,15 +1140,12 @@ else:
 
                     st.rerun()
 
-
                 except Exception as e:
 
                     st.error(
                         "Unable to save the human decision: "
                         f"{e}"
                     )
-
-
 # ---------------------------------------------------------
 # PAGE NAVIGATION
 # ---------------------------------------------------------
