@@ -1,6 +1,7 @@
 import time
 
 from google import genai
+from google.genai import types
 from groq import Groq
 from openai import OpenAI
 
@@ -11,50 +12,52 @@ from config.settings import (
 )
 
 
-# -------------------------------------------------------------------
-# Provider configuration
-# -------------------------------------------------------------------
-
 GEMINI_MODEL = "gemini-3.5-flash"
 GROQ_MODEL = "openai/gpt-oss-120b"
 OPENROUTER_MODEL = "openrouter/free"
 
-# Deliberately no automatic retry loops.
-# A failed provider moves immediately to the next provider.
 PROVIDER_TIMEOUT = 60
+
+# Gemini SDK retry policy.
+#
+# The application itself controls provider fallback:
+#
+# Gemini -> Groq -> OpenRouter
+#
+# Therefore Gemini should not perform hidden retries that delay
+# fallback to the next provider.
+GEMINI_RETRY_ATTEMPTS = 1
 
 
 class LLMProviderError(Exception):
-    """
-    Raised when an individual LLM provider cannot complete a request.
-    """
     pass
 
 
 class AllLLMProvidersFailed(Exception):
-    """
-    Raised when all configured LLM providers fail.
-    """
 
     def __init__(self, errors):
+
         self.errors = errors
 
-        message = "All configured LLM providers failed."
+        message = (
+            "All configured LLM providers failed."
+        )
 
         if errors:
+
             details = "\n".join(
                 f"- {provider}: {error}"
                 for provider, error in errors.items()
             )
-            message = f"{message}\n{details}"
+
+            message = (
+                f"{message}\n{details}"
+            )
 
         super().__init__(message)
 
 
 def _is_transient_error(error):
-    """
-    Identify errors where moving to the next provider is appropriate.
-    """
 
     error_text = str(error).lower()
 
@@ -80,23 +83,27 @@ def _is_transient_error(error):
 
 
 def _generate_with_gemini(prompt):
-    """
-    Execute one Gemini request.
-
-    Important:
-    No application-level retry is performed here.
-    """
 
     api_key = get_gemini_api_key()
 
     if not api_key:
+
         raise LLMProviderError(
             "GEMINI_API_KEY is not configured."
         )
 
     try:
+
+        http_options = types.HttpOptions(
+            timeout=PROVIDER_TIMEOUT * 1000,
+            retry_options=types.HttpRetryOptions(
+                attempts=GEMINI_RETRY_ATTEMPTS
+            ),
+        )
+
         client = genai.Client(
-            api_key=api_key
+            api_key=api_key,
+            http_options=http_options,
         )
 
         response = client.models.generate_content(
@@ -104,7 +111,11 @@ def _generate_with_gemini(prompt):
             contents=prompt,
         )
 
-        if not response or not response.text:
+        if (
+            not response
+            or not response.text
+        ):
+
             raise LLMProviderError(
                 "Gemini returned an empty response."
             )
@@ -114,6 +125,7 @@ def _generate_with_gemini(prompt):
     except Exception as error:
 
         if _is_transient_error(error):
+
             raise LLMProviderError(
                 f"Gemini transient/provider error: {error}"
             ) from error
@@ -124,18 +136,17 @@ def _generate_with_gemini(prompt):
 
 
 def _generate_with_groq(prompt):
-    """
-    Execute one Groq request.
-    """
 
     api_key = get_groq_api_key()
 
     if not api_key:
+
         raise LLMProviderError(
             "GROQ_API_KEY is not configured."
         )
 
     try:
+
         client = Groq(
             api_key=api_key,
             timeout=PROVIDER_TIMEOUT,
@@ -157,6 +168,7 @@ def _generate_with_groq(prompt):
             or not response.choices
             or not response.choices[0].message.content
         ):
+
             raise LLMProviderError(
                 "Groq returned an empty response."
             )
@@ -164,26 +176,24 @@ def _generate_with_groq(prompt):
         return response.choices[0].message.content
 
     except Exception as error:
+
         raise LLMProviderError(
             f"Groq request failed: {error}"
         ) from error
 
 
 def _generate_with_openrouter(prompt):
-    """
-    Execute one OpenRouter request.
-
-    OpenRouter exposes an OpenAI-compatible API.
-    """
 
     api_key = get_openrouter_api_key()
 
     if not api_key:
+
         raise LLMProviderError(
             "OPENROUTER_API_KEY is not configured."
         )
 
     try:
+
         client = OpenAI(
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1",
@@ -206,6 +216,7 @@ def _generate_with_openrouter(prompt):
             or not response.choices
             or not response.choices[0].message.content
         ):
+
             raise LLMProviderError(
                 "OpenRouter returned an empty response."
             )
@@ -213,35 +224,16 @@ def _generate_with_openrouter(prompt):
         return response.choices[0].message.content
 
     except Exception as error:
+
         raise LLMProviderError(
             f"OpenRouter request failed: {error}"
         ) from error
 
 
 def generate_with_fallback(prompt):
-    """
-    Generate an LLM response using the configured provider hierarchy.
-
-    Provider order:
-
-        1. Gemini
-        2. Groq GPT-OSS 120B
-        3. OpenRouter Free
-
-    Each provider is attempted only once.
-
-    Returns:
-        {
-            "text": "...",
-            "provider": "gemini|groq|openrouter",
-            "model": "...",
-        }
-
-    Raises:
-        AllLLMProvidersFailed
-    """
 
     if not prompt or not str(prompt).strip():
+
         raise ValueError(
             "LLM prompt cannot be empty."
         )
@@ -266,17 +258,23 @@ def generate_with_fallback(prompt):
 
     errors = {}
 
-    for provider_name, model_name, provider_function in providers:
+    for (
+        provider_name,
+        model_name,
+        provider_function,
+    ) in providers:
 
         started = time.time()
 
         try:
 
-            text = provider_function(prompt)
+            text = provider_function(
+                prompt
+            )
 
             elapsed = round(
                 time.time() - started,
-                2
+                2,
             )
 
             return {
@@ -288,9 +286,10 @@ def generate_with_fallback(prompt):
 
         except Exception as error:
 
-            errors[provider_name] = str(error)
+            errors[provider_name] = str(
+                error
+            )
 
-            # Move immediately to the next provider.
             continue
 
     raise AllLLMProvidersFailed(
