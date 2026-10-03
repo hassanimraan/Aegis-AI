@@ -378,3 +378,29 @@ st.caption(
     "AegisAI Case History — Human decisions are authoritative "
     "and AI recommendations are advisory."
 )
+
+
+# ---------------------------------------------------------
+# PAGE NAVIGATION
+# ---------------------------------------------------------
+
+st.divider()
+
+nav_left, nav_right = st.columns([1, 1])
+
+with nav_left:
+    if st.button(
+        "← Decision",
+        use_container_width=True,
+        key="history_previous"
+    ):
+        st.switch_page("pages/4_Decision.py")
+
+with nav_right:
+    if st.button(
+        "Next: Report →",
+        use_container_width=True,
+        key="history_next"
+    ):
+        st.switch_page("pages/6_Report.py")
+        
