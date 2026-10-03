@@ -13,9 +13,9 @@ st.set_page_config(
 )
 
 
-# ==========================================
+# =========================================================
 # AUTH CHECK
-# ==========================================
+# =========================================================
 
 if (
     "user" not in st.session_state
@@ -30,9 +30,230 @@ user = st.session_state["user"]
 supabase = get_supabase()
 
 
-# ==========================================
+# =========================================================
+# CONSTANTS
+# =========================================================
+
+REVIEW_STEPS = [
+    ("RAG", "Policy Retrieval"),
+    ("COMPLIANCE", "Compliance Agent"),
+    ("FINANCIAL", "Financial Agent"),
+    ("RISK", "Risk Agent"),
+    ("SYNTHESIS", "Decision Synthesizer"),
+    ("EVIDENCE", "Evidence Gate"),
+]
+
+
+# =========================================================
+# HELPERS
+# =========================================================
+
+def clear_session_review():
+    st.session_state.pop(
+        "ai_case_review",
+        None
+    )
+
+    st.session_state.pop(
+        "ai_case_review_id",
+        None
+    )
+
+
+def reset_case_review(case_id):
+    """
+    Clears previous AI checkpoints and final AI review.
+
+    Used when case evidence changes or the user explicitly
+    requests a complete restart.
+    """
+
+    try:
+        (
+            supabase
+            .table("ai_review_steps")
+            .delete()
+            .eq("case_id", case_id)
+            .execute()
+        )
+
+        (
+            supabase
+            .table("ai_reviews")
+            .delete()
+            .eq("case_id", case_id)
+            .execute()
+        )
+
+        clear_session_review()
+
+        return True
+
+    except Exception as error:
+
+        st.error(
+            f"Unable to reset the AI review: {error}"
+        )
+
+        return False
+
+
+def get_review_steps(case_id):
+    """
+    Load persistent AI workflow checkpoints.
+    """
+
+    try:
+
+        response = (
+            supabase
+            .table("ai_review_steps")
+            .select("*")
+            .eq("case_id", case_id)
+            .order("step_order")
+            .execute()
+        )
+
+        return response.data or []
+
+    except Exception:
+
+        return []
+
+
+def step_status_map(case_id):
+    """
+    Convert checkpoint records into:
+        {
+            "RAG": {...},
+            "COMPLIANCE": {...}
+        }
+    """
+
+    records = get_review_steps(case_id)
+
+    return {
+        record.get("step_name"): record
+        for record in records
+    }
+
+
+def display_review_progress(case_id):
+    """
+    Display the persistent six-step AI workflow.
+    """
+
+    st.subheader("AI Review Progress")
+
+    steps = step_status_map(case_id)
+
+    completed_count = sum(
+        1
+        for step_name, _ in REVIEW_STEPS
+        if steps.get(step_name, {}).get("status") == "COMPLETED"
+    )
+
+    progress_value = completed_count / len(REVIEW_STEPS)
+
+    st.progress(
+        progress_value,
+        text=f"{completed_count}/{len(REVIEW_STEPS)} steps completed"
+    )
+
+    for step_name, display_name in REVIEW_STEPS:
+
+        record = steps.get(step_name)
+
+        if not record:
+
+            st.info(
+                f"⚪ {display_name} — Pending"
+            )
+
+            continue
+
+        status = record.get(
+            "status",
+            "PENDING"
+        )
+
+        provider = record.get(
+            "provider"
+        )
+
+        model = record.get(
+            "model"
+        )
+
+        if status == "COMPLETED":
+
+            provider_text = ""
+
+            if provider:
+                provider_text = f" | Provider: {provider}"
+
+            st.success(
+                f"🟢 {display_name} — Completed"
+                f"{provider_text}"
+            )
+
+        elif status == "RUNNING":
+
+            st.warning(
+                f"🟡 {display_name} — Running"
+            )
+
+        elif status == "FAILED":
+
+            st.error(
+                f"🔴 {display_name} — Failed"
+            )
+
+            error_text = record.get(
+                "error"
+            )
+
+            if error_text:
+                st.caption(
+                    f"Error: {error_text}"
+                )
+
+        else:
+
+            st.info(
+                f"⚪ {display_name} — Pending"
+            )
+
+        if model and status == "COMPLETED":
+
+            st.caption(
+                f"Model: {model}"
+            )
+
+
+def extract_review_text(result):
+    """
+    Agents now return a router result dictionary.
+    This helper extracts the actual analysis text.
+    """
+
+    if isinstance(result, dict):
+
+        return result.get(
+            "text",
+            ""
+        )
+
+    if result is None:
+
+        return ""
+
+    return str(result)
+
+
+# =========================================================
 # HEADER
-# ==========================================
+# =========================================================
 
 st.title("📝 Create Approval Case")
 
@@ -44,9 +265,9 @@ st.write(
 st.divider()
 
 
-# ==========================================
-# CREATE CASE
-# ==========================================
+# =========================================================
+# 1. CREATE CASE
+# =========================================================
 
 st.subheader("1. Request Information")
 
@@ -105,30 +326,50 @@ with st.form("create_case_form"):
     )
 
 
-# ==========================================
+# =========================================================
 # SAVE CASE
-# ==========================================
+# =========================================================
 
 if submitted:
 
     if not title.strip():
-        st.error("Please enter the request title.")
+
+        st.error(
+            "Please enter the request title."
+        )
+
         st.stop()
 
     if not requester.strip():
-        st.error("Please enter the requester.")
+
+        st.error(
+            "Please enter the requester."
+        )
+
         st.stop()
 
     if amount <= 0:
-        st.error("Amount must be greater than zero.")
+
+        st.error(
+            "Amount must be greater than zero."
+        )
+
         st.stop()
 
     if not description.strip():
-        st.error("Please enter the request description.")
+
+        st.error(
+            "Please enter the request description."
+        )
+
         st.stop()
 
     if not business_justification.strip():
-        st.error("Please enter the business justification.")
+
+        st.error(
+            "Please enter the business justification."
+        )
+
         st.stop()
 
     try:
@@ -157,17 +398,11 @@ if submitted:
 
             case_id = response.data[0]["id"]
 
-            st.session_state["current_case_id"] = case_id
+            st.session_state[
+                "current_case_id"
+            ] = case_id
 
-            st.session_state.pop(
-                "ai_case_review",
-                None
-            )
-
-            st.session_state.pop(
-                "ai_case_review_id",
-                None
-            )
+            clear_session_review()
 
             st.success(
                 "Approval case created successfully."
@@ -183,28 +418,38 @@ if submitted:
                 "Case could not be created."
             )
 
-    except Exception as e:
+    except Exception as error:
 
         st.error(
-            f"Error creating case: {str(e)}"
+            f"Error creating case: {error}"
         )
 
 
-# ==========================================
-# DOCUMENT UPLOAD
-# ==========================================
+# =========================================================
+# CURRENT CASE
+# =========================================================
 
 if "current_case_id" in st.session_state:
 
-    case_id = st.session_state["current_case_id"]
+    case_id = st.session_state[
+        "current_case_id"
+    ]
+
+
+    # =====================================================
+    # 2. DOCUMENT UPLOAD
+    # =====================================================
 
     st.divider()
 
-    st.subheader("2. Upload Supporting Documents")
+    st.subheader(
+        "2. Upload Supporting Documents"
+    )
 
     st.write(
         "Upload the available PDF documents for this case. "
-        "The AI Review will determine which evidence is required."
+        "The AI Review will determine which evidence is required "
+        "from the applicable policy and case scenario."
     )
 
     document_type = st.selectbox(
@@ -217,12 +462,14 @@ if "current_case_id" in st.session_state:
             "Comparative Statement",
             "Approval Request",
             "Other"
-        ]
+        ],
+        key="document_type_selector"
     )
 
     uploaded_file = st.file_uploader(
         "Select PDF document",
-        type=["pdf"]
+        type=["pdf"],
+        key="case_pdf_uploader"
     )
 
     if uploaded_file:
@@ -233,14 +480,11 @@ if "current_case_id" in st.session_state:
 
         if st.button(
             "📤 Upload & Extract Text",
-            type="primary"
+            type="primary",
+            key="upload_document_button"
         ):
 
             try:
-
-                # ------------------------------------------
-                # READ PDF
-                # ------------------------------------------
 
                 reader = PdfReader(
                     uploaded_file
@@ -253,15 +497,14 @@ if "current_case_id" in st.session_state:
                     text = page.extract_text()
 
                     if text:
-                        extracted_pages.append(text)
+
+                        extracted_pages.append(
+                            text
+                        )
 
                 extracted_text = "\n\n".join(
                     extracted_pages
                 )
-
-                # ------------------------------------------
-                # CHECK TEXT
-                # ------------------------------------------
 
                 if not extracted_text.strip():
 
@@ -271,10 +514,6 @@ if "current_case_id" in st.session_state:
                     )
 
                     st.stop()
-
-                # ------------------------------------------
-                # SAVE DOCUMENT
-                # ------------------------------------------
 
                 response = (
                     supabase
@@ -290,14 +529,26 @@ if "current_case_id" in st.session_state:
 
                 if response.data:
 
-                    st.success(
-                        f"{uploaded_file.name} uploaded successfully."
-                    )
+                    # Evidence has changed.
+                    # Existing AI analysis is no longer valid.
+                    if reset_case_review(case_id):
 
-                    st.info(
-                        f"Extracted approximately "
-                        f"{len(extracted_text):,} characters."
-                    )
+                        st.success(
+                            f"{uploaded_file.name} uploaded successfully."
+                        )
+
+                        st.info(
+                            f"Extracted approximately "
+                            f"{len(extracted_text):,} characters."
+                        )
+
+                        st.info(
+                            "Previous AI analysis was cleared because "
+                            "the case evidence changed. A new review "
+                            "will start from the beginning."
+                        )
+
+                        st.rerun()
 
                 else:
 
@@ -305,24 +556,22 @@ if "current_case_id" in st.session_state:
                         "Document could not be saved."
                     )
 
-            except Exception as e:
+            except Exception as error:
 
                 st.error(
-                    f"Error processing document: {str(e)}"
+                    f"Error processing document: {error}"
                 )
 
 
-# ==========================================
-# CURRENT CASE DOCUMENTS
-# ==========================================
-
-if "current_case_id" in st.session_state:
-
-    case_id = st.session_state["current_case_id"]
+    # =====================================================
+    # 3. CURRENT CASE DOCUMENTS
+    # =====================================================
 
     st.divider()
 
-    st.subheader("3. Uploaded Documents")
+    st.subheader(
+        "3. Uploaded Documents"
+    )
 
     try:
 
@@ -344,7 +593,9 @@ if "current_case_id" in st.session_state:
                 start=1
             ):
 
-                document_id = document.get("id")
+                document_id = document.get(
+                    "id"
+                )
 
                 document_name = document.get(
                     "document_name",
@@ -395,28 +646,33 @@ if "current_case_id" in st.session_state:
                                 .execute()
                             )
 
-                            st.success(
-                                f"{document_name} removed successfully."
-                            )
+                            if delete_response.data:
 
-                            # Remove any previous AI review because
-                            # the case evidence has changed.
-                            st.session_state.pop(
-                                "ai_case_review",
-                                None
-                            )
+                                if reset_case_review(
+                                    case_id
+                                ):
 
-                            st.session_state.pop(
-                                "ai_case_review_id",
-                                None
-                            )
+                                    st.success(
+                                        f"{document_name} removed successfully."
+                                    )
 
-                            st.rerun()
+                                    st.info(
+                                        "Previous AI analysis was cleared "
+                                        "because the case evidence changed."
+                                    )
 
-                        except Exception as e:
+                                    st.rerun()
+
+                            else:
+
+                                st.warning(
+                                    "Document could not be removed."
+                                )
+
+                        except Exception as error:
 
                             st.error(
-                                f"Unable to remove document: {str(e)}"
+                                f"Unable to remove document: {error}"
                             )
 
         else:
@@ -425,42 +681,103 @@ if "current_case_id" in st.session_state:
                 "No documents uploaded yet."
             )
 
-    except Exception as e:
+    except Exception as error:
 
         st.error(
-            f"Unable to load documents: {str(e)}"
+            f"Unable to load documents: {error}"
         )
-# ==========================================
-# AI CASE REVIEW
-# ==========================================
 
-if "current_case_id" in st.session_state:
 
-    case_id = st.session_state["current_case_id"]
+    # =====================================================
+    # 4. AI CASE REVIEW
+    # =====================================================
 
     st.divider()
 
-    st.subheader("4. AI Case Review")
-
-    st.info(
-        "Run the AI review after uploading the available "
-        "case documents. AegisAI will retrieve the applicable "
-        "policy evidence, determine the required evidence, "
-        "and run the Compliance, Financial, Risk, and "
-        "Decision Synthesizer agents."
+    st.subheader(
+        "4. AI Case Review"
     )
 
-    if st.button(
-        "🚀 Run AI Case Review",
-        type="primary",
-        use_container_width=True
-    ):
+    st.info(
+        "AegisAI processes the review sequentially. "
+        "Each completed step is saved to Supabase. "
+        "If a provider or step fails, running the review again "
+        "resumes from the last incomplete step."
+    )
+
+
+    # -----------------------------------------------------
+    # SHOW EXISTING PROGRESS
+    # -----------------------------------------------------
+
+    existing_steps = get_review_steps(
+        case_id
+    )
+
+    if existing_steps:
+
+        display_review_progress(
+            case_id
+        )
+
+        st.divider()
+
+
+    # -----------------------------------------------------
+    # REVIEW CONTROLS
+    # -----------------------------------------------------
+
+    review_col, restart_col = st.columns(
+        [3, 1]
+    )
+
+    with review_col:
+
+        run_review = st.button(
+            "🚀 Run / Resume AI Case Review",
+            type="primary",
+            use_container_width=True,
+            key="run_ai_case_review"
+        )
+
+    with restart_col:
+
+        restart_review = st.button(
+            "🔄 Restart",
+            use_container_width=True,
+            key="restart_ai_case_review"
+        )
+
+
+    # -----------------------------------------------------
+    # EXPLICIT RESTART
+    # -----------------------------------------------------
+
+    if restart_review:
+
+        if reset_case_review(
+            case_id
+        ):
+
+            st.success(
+                "AI review checkpoints cleared. "
+                "The next review will start from the beginning."
+            )
+
+            st.rerun()
+
+
+    # -----------------------------------------------------
+    # RUN / RESUME REVIEW
+    # -----------------------------------------------------
+
+    if run_review:
 
         try:
 
-            # ------------------------------------------
+            # ---------------------------------------------
             # LOAD CASE
-            # ------------------------------------------
+            # ---------------------------------------------
 
             case_response = (
                 supabase
@@ -484,9 +801,10 @@ if "current_case_id" in st.session_state:
 
                 st.stop()
 
-            # ------------------------------------------
+
+            # ---------------------------------------------
             # LOAD DOCUMENTS
-            # ------------------------------------------
+            # ---------------------------------------------
 
             document_response = (
                 supabase
@@ -496,6 +814,7 @@ if "current_case_id" in st.session_state:
                     "case_id",
                     case_id
                 )
+                .order("created_at")
                 .execute()
             )
 
@@ -503,30 +822,68 @@ if "current_case_id" in st.session_state:
                 document_response.data or []
             )
 
-            # ------------------------------------------
-            # RUN AI REVIEW
-            # ------------------------------------------
 
-            with st.spinner(
-                "Running policy retrieval and multi-agent review..."
-            ):
+            # ---------------------------------------------
+            # RUN WORKFLOW
+            # ---------------------------------------------
 
-                review = run_ai_case_review(
-                    current_case,
-                    current_documents
-                )
+            progress_placeholder = st.empty()
 
-            # ------------------------------------------
-            # KEEP REVIEW IN SESSION
-            # ------------------------------------------
+            status_placeholder = st.empty()
 
-            st.session_state["ai_case_review"] = review
+            progress_placeholder.progress(
+                0,
+                text="Starting AegisAI review..."
+            )
 
-            st.session_state["ai_case_review_id"] = case_id
+            status_placeholder.info(
+                "The review will resume from the first "
+                "incomplete checkpoint."
+            )
 
-            # ------------------------------------------
-            # SAVE AI REVIEW
-            # ------------------------------------------
+            review = run_ai_case_review(
+                current_case,
+                current_documents
+            )
+
+
+            # ---------------------------------------------
+            # STORE COMPLETE REVIEW IN SESSION
+            # ---------------------------------------------
+
+            st.session_state[
+                "ai_case_review"
+            ] = review
+
+            st.session_state[
+                "ai_case_review_id"
+            ] = case_id
+
+
+            # ---------------------------------------------
+            # EXTRACT FINAL TEXT RESULTS
+            # ---------------------------------------------
+
+            compliance_text = extract_review_text(
+                review.get("compliance")
+            )
+
+            financial_text = extract_review_text(
+                review.get("financial")
+            )
+
+            risk_text = extract_review_text(
+                review.get("risk")
+            )
+
+            synthesis_text = extract_review_text(
+                review.get("synthesis")
+            )
+
+
+            # ---------------------------------------------
+            # SAVE FINAL AI REVIEW
+            # ---------------------------------------------
 
             ai_review_response = (
                 supabase
@@ -534,30 +891,15 @@ if "current_case_id" in st.session_state:
                 .insert({
                     "case_id": case_id,
 
-                    "compliance_result": review.get(
-                        "compliance",
-                        ""
-                    ),
+                    "compliance_result": compliance_text,
 
-                    "financial_result": review.get(
-                        "financial",
-                        ""
-                    ),
+                    "financial_result": financial_text,
 
-                    "risk_result": review.get(
-                        "risk",
-                        ""
-                    ),
+                    "risk_result": risk_text,
 
-                    "synthesis": review.get(
-                        "synthesis",
-                        ""
-                    ),
+                    "synthesis": synthesis_text,
 
-                    "recommendation": review.get(
-                        "synthesis",
-                        ""
-                    ),
+                    "recommendation": synthesis_text,
 
                     "requirements": review.get(
                         "requirements",
@@ -572,136 +914,195 @@ if "current_case_id" in st.session_state:
                 .execute()
             )
 
-            # ------------------------------------------
-            # CHECK DATABASE SAVE
-            # ------------------------------------------
+
+            # ---------------------------------------------
+            # FINAL CHECK
+            # ---------------------------------------------
 
             if not ai_review_response.data:
 
                 st.warning(
-                    "AI review completed, but the review "
+                    "AI review completed, but the final review "
                     "could not be saved to the database."
                 )
 
             else:
 
-                st.success(
-                    "AI Case Review completed successfully."
+                progress_placeholder.progress(
+                    1.0,
+                    text="6/6 steps completed"
                 )
 
-        except Exception as e:
+                status_placeholder.success(
+                    "AegisAI Case Review completed successfully."
+                )
+
+                st.success(
+                    "✅ Complete AI Case Review saved successfully."
+                )
+
+                st.rerun()
+
+
+        except Exception as error:
 
             st.error(
-                f"AI review failed: {str(e)}"
+                f"AI review stopped: {error}"
+            )
+
+            st.info(
+                "Your completed checkpoints have been preserved. "
+                "You can press 'Run / Resume AI Case Review' again "
+                "to continue from the failed step."
+            )
+
+            display_review_progress(
+                case_id
             )
 
 
-# ==========================================
-# DISPLAY AI REVIEW
-# ==========================================
+    # =====================================================
+    # DISPLAY CURRENT AI REVIEW
+    # =====================================================
 
-if (
-    st.session_state.get("ai_case_review_id")
-    == st.session_state.get("current_case_id")
-    and "ai_case_review" in st.session_state
-):
+    if (
+        st.session_state.get(
+            "ai_case_review_id"
+        )
+        == case_id
+        and
+        "ai_case_review"
+        in st.session_state
+    ):
 
-    review = st.session_state["ai_case_review"]
+        review = st.session_state[
+            "ai_case_review"
+        ]
 
-    st.divider()
+        st.divider()
 
-    st.subheader("📋 Evidence Requirements")
-
-    requirements = review.get(
-        "requirements",
-        []
-    )
-
-    if requirements:
-
-        for item in requirements:
-
-            if item.get("status") == "COMPLETE":
-
-                st.success(
-                    f"✅ {item.get('name', 'Requirement')}"
-                )
-
-            else:
-
-                st.error(
-                    f"❌ {item.get('name', 'Requirement')} — MISSING"
-                )
-
-            if item.get("reason"):
-
-                st.caption(
-                    item["reason"]
-                )
-
-    else:
-
-        st.info(
-            "No mandatory evidence requirements were "
-            "identified from the retrieved policy evidence."
+        st.subheader(
+            "📋 Evidence Requirements"
         )
 
-    # ==========================================
-    # EVIDENCE GATE
-    # ==========================================
-
-    gate = review.get(
-        "evidence_gate",
-        {}
-    )
-
-    st.subheader("🔐 Evidence Gate")
-
-    if gate.get("complete", False):
-
-        st.success(
-            "✅ Evidence Gate PASSED — all identified "
-            "mandatory evidence is available."
+        requirements = review.get(
+            "requirements",
+            []
         )
 
-    else:
+        if requirements:
 
-        st.error(
-            "🔴 Evidence Gate BLOCKED — mandatory "
-            "policy-required evidence is missing."
-        )
+            for item in requirements:
 
-        for item in gate.get("missing", []):
+                if item.get(
+                    "status"
+                ) == "COMPLETE":
 
-            st.write(
-                f"• **{item.get('name', 'Requirement')}**"
+                    st.success(
+                        f"✅ {item.get('name', 'Requirement')}"
+                    )
+
+                else:
+
+                    st.error(
+                        f"❌ {item.get('name', 'Requirement')} — MISSING"
+                    )
+
+                if item.get(
+                    "reason"
+                ):
+
+                    st.caption(
+                        item["reason"]
+                    )
+
+        else:
+
+            st.info(
+                "No mandatory evidence requirements were "
+                "identified from the retrieved policy evidence."
             )
 
-            if item.get("reason"):
 
-                st.caption(
-                    item["reason"]
+        # =================================================
+        # EVIDENCE GATE
+        # =================================================
+
+        gate = review.get(
+            "evidence_gate",
+            {}
+        )
+
+        st.subheader(
+            "🔐 Evidence Gate"
+        )
+
+        if gate.get(
+            "complete",
+            False
+        ):
+
+            st.success(
+                "✅ Evidence Gate PASSED — all identified "
+                "mandatory evidence is available."
+            )
+
+        else:
+
+            st.error(
+                "🔴 Evidence Gate BLOCKED — mandatory "
+                "policy-required evidence is missing."
+            )
+
+            for item in gate.get(
+                "missing",
+                []
+            ):
+
+                st.write(
+                    f"• **{item.get('name', 'Requirement')}**"
                 )
-# ---------------------------------------------------------
+
+                if item.get(
+                    "reason"
+                ):
+
+                    st.caption(
+                        item["reason"]
+                    )
+
+
+# =========================================================
 # PAGE NAVIGATION
-# ---------------------------------------------------------
+# =========================================================
 
 st.divider()
 
-nav_left, nav_right = st.columns([1, 1])
+nav_left, nav_right = st.columns(
+    [1, 1]
+)
 
 with nav_left:
+
     if st.button(
         "← Dashboard",
         use_container_width=True,
         key="create_case_previous"
     ):
-        st.switch_page("pages/1_Dashboard.py")
+
+        st.switch_page(
+            "pages/1_Dashboard.py"
+        )
+
 
 with nav_right:
+
     if st.button(
         "Next: Case Review →",
         use_container_width=True,
         key="create_case_next"
     ):
-        st.switch_page("pages/3_Case_Review.py")
+
+        st.switch_page(
+            "pages/3_Case_Review.py"
+        )
