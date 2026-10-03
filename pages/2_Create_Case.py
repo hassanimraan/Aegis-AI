@@ -115,8 +115,11 @@ def record_evidence_change(
     """
     Records that case evidence changed.
 
-    This audit event is used to determine whether a previous
-    human decision is still applicable to the current evidence.
+    If a previous human decision exists, the decision is
+    explicitly marked as superseded through the audit trail.
+
+    The case is returned to DRAFT status because the previous
+    decision no longer applies to the changed evidence.
     """
 
     try:
@@ -133,7 +136,11 @@ def record_evidence_change(
                 f" Document Type: {document_type}."
             )
 
-        response = (
+        # -----------------------------------------------------
+        # Record evidence change
+        # -----------------------------------------------------
+
+        evidence_change_response = (
             supabase
             .table("audit_logs")
             .insert({
@@ -145,18 +152,103 @@ def record_evidence_change(
             .execute()
         )
 
-        return bool(response.data)
+        if not evidence_change_response.data:
+
+            return False
+
+        # -----------------------------------------------------
+        # Check whether a previous human decision exists
+        # -----------------------------------------------------
+
+        decision_response = (
+            supabase
+            .table("decisions")
+            .select(
+                "id, decision, created_at"
+            )
+            .eq(
+                "case_id",
+                case_id
+            )
+            .order(
+                "created_at",
+                desc=True
+            )
+            .limit(1)
+            .execute()
+        )
+
+        previous_decisions = (
+            decision_response.data or []
+        )
+
+        # -----------------------------------------------------
+        # Mark previous decision as superseded
+        # -----------------------------------------------------
+
+        if previous_decisions:
+
+            previous_decision = (
+                previous_decisions[0]
+            )
+
+            previous_decision_id = (
+                previous_decision.get("id")
+            )
+
+            previous_decision_value = (
+                previous_decision.get(
+                    "decision",
+                    "Unknown"
+                )
+            )
+
+            (
+                supabase
+                .table("audit_logs")
+                .insert({
+                    "case_id": case_id,
+                    "user_id": user_id,
+                    "action": "DECISION_SUPERSEDED",
+                    "details": (
+                        "Previous human decision "
+                        f"{previous_decision_value} "
+                        f"(Decision ID: "
+                        f"{previous_decision_id}) "
+                        "was superseded because "
+                        "case evidence changed."
+                    ),
+                })
+                .execute()
+            )
+
+        # -----------------------------------------------------
+        # Return case to DRAFT
+        # -----------------------------------------------------
+
+        (
+            supabase
+            .table("cases")
+            .update({
+                "status": "DRAFT"
+            })
+            .eq(
+                "id",
+                case_id
+            )
+            .execute()
+        )
+
+        return True
 
     except Exception as error:
 
         st.error(
-            f"Unable to record evidence-change audit event: {error}"
+            "Unable to record evidence-change event: "
+            f"{error}"
         )
 
         return False
-
-
-def get_review_steps(case_id):
     """
     Load persistent AI workflow checkpoints.
     """
