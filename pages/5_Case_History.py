@@ -1,6 +1,7 @@
 import streamlit as st
 
 from database.supabase_client import get_supabase
+from pypdf import PdfReader
 
 
 st.set_page_config(
@@ -26,14 +27,7 @@ if (
     st.stop()
 
 
-st.title("📚 Case History")
-
-st.write(
-    "Review previous approval cases, AI recommendations, "
-    "human decisions, and audit information."
-)
-
-st.divider()
+user = st.session_state["user"]
 
 
 # ---------------------------------------------------------
@@ -54,6 +48,21 @@ except Exception as e:
 
 
 # ---------------------------------------------------------
+# Header
+# ---------------------------------------------------------
+
+st.title("📚 Case History")
+
+st.write(
+    "Review previous approval cases, AI recommendations, "
+    "human decisions, audit information, and manage "
+    "case documents."
+)
+
+st.divider()
+
+
+# ---------------------------------------------------------
 # Load Cases
 # ---------------------------------------------------------
 
@@ -65,7 +74,7 @@ try:
         .select("*")
         .eq(
             "user_id",
-            st.session_state["user"].id
+            user.id
         )
         .order(
             "created_at",
@@ -95,6 +104,34 @@ if not cases:
         "No approval cases have been created yet."
     )
 
+    st.divider()
+
+    nav_left, nav_right = st.columns([1, 1])
+
+    with nav_left:
+
+        if st.button(
+            "← Decision",
+            use_container_width=True,
+            key="history_previous_empty"
+        ):
+
+            st.switch_page(
+                "pages/4_Decision.py"
+            )
+
+    with nav_right:
+
+        if st.button(
+            "Next: Report →",
+            use_container_width=True,
+            key="history_next_empty"
+        ):
+
+            st.switch_page(
+                "pages/6_Report.py"
+            )
+
     st.stop()
 
 
@@ -109,19 +146,25 @@ total_cases = len(cases)
 approved_cases = sum(
     1
     for case in cases
-    if str(case.get("status", "")).upper() == "APPROVED"
+    if str(
+        case.get("status", "")
+    ).upper() == "APPROVED"
 )
 
 returned_cases = sum(
     1
     for case in cases
-    if str(case.get("status", "")).upper() == "RETURNED"
+    if str(
+        case.get("status", "")
+    ).upper() == "RETURNED"
 )
 
 rejected_cases = sum(
     1
     for case in cases
-    if str(case.get("status", "")).upper() == "REJECTED"
+    if str(
+        case.get("status", "")
+    ).upper() == "REJECTED"
 )
 
 col1, col2, col3, col4 = st.columns(4)
@@ -215,7 +258,11 @@ for case in cases:
         reviews = []
 
 
-    review = reviews[0] if reviews else {}
+    review = (
+        reviews[0]
+        if reviews
+        else {}
+    )
 
 
     # -----------------------------------------------------
@@ -339,6 +386,362 @@ for case in cases:
 
 
         # -------------------------------------------------
+        # Case Documents
+        # -------------------------------------------------
+
+        st.divider()
+
+        st.write("### 📎 Case Documents")
+
+        try:
+
+            document_response = (
+                supabase
+                .table("documents")
+                .select("*")
+                .eq(
+                    "case_id",
+                    case_id
+                )
+                .order(
+                    "created_at"
+                )
+                .execute()
+            )
+
+            documents = (
+                document_response.data or []
+            )
+
+        except Exception as e:
+
+            documents = []
+
+            st.error(
+                f"Unable to load case documents: {e}"
+            )
+
+
+        if documents:
+
+            for index, document in enumerate(
+                documents,
+                start=1
+            ):
+
+                document_id = document.get("id")
+
+                document_name = document.get(
+                    "document_name",
+                    "Unnamed document"
+                )
+
+                document_type = document.get(
+                    "document_type",
+                    "Other"
+                )
+
+                col_info, col_remove = st.columns(
+                    [5, 1]
+                )
+
+                with col_info:
+
+                    st.write(
+                        f"**{index}. {document_name}**"
+                    )
+
+                    st.caption(
+                        f"Document Type: {document_type}"
+                    )
+
+                with col_remove:
+
+                    if st.button(
+                        "🗑️ Remove",
+                        use_container_width=True,
+                        key=f"history_remove_document_{document_id}"
+                    ):
+
+                        try:
+
+                            delete_response = (
+                                supabase
+                                .table("documents")
+                                .delete()
+                                .eq(
+                                    "id",
+                                    document_id
+                                )
+                                .eq(
+                                    "case_id",
+                                    case_id
+                                )
+                                .execute()
+                            )
+
+                            if delete_response.data is not None:
+
+                                st.session_state[
+                                    "current_case_id"
+                                ] = case_id
+
+                                st.session_state[
+                                    "documents_changed_case_id"
+                                ] = case_id
+
+                                st.success(
+                                    f"{document_name} "
+                                    f"was removed successfully."
+                                )
+
+                                st.rerun()
+
+                            else:
+
+                                st.error(
+                                    "The document could not be removed."
+                                )
+
+                        except Exception as e:
+
+                            st.error(
+                                f"Unable to remove document: {e}"
+                            )
+
+        else:
+
+            st.info(
+                "No documents are currently uploaded "
+                "for this case."
+            )
+
+
+        # -------------------------------------------------
+        # Upload Replacement Document
+        # -------------------------------------------------
+
+        st.write("### ➕ Upload / Replace Document")
+
+        if review or human_decision:
+
+            st.warning(
+                "This case already has an AI review or human "
+                "decision. Changing its documents will make "
+                "the existing AI assessment outdated. After "
+                "uploading or removing documents, open "
+                "Create Approval Case and run a new AI Case Review."
+            )
+
+
+        upload_col1, upload_col2 = st.columns(
+            [2, 3]
+        )
+
+        with upload_col1:
+
+            replacement_type = st.selectbox(
+                "Document Type",
+                [
+                    "Purchase Request",
+                    "Business Justification",
+                    "Vendor Quotation",
+                    "Technical Evaluation",
+                    "Comparative Statement",
+                    "Approval Request",
+                    "Other"
+                ],
+                key=f"history_document_type_{case_id}"
+            )
+
+        with upload_col2:
+
+            replacement_file = st.file_uploader(
+                "Select PDF document",
+                type=["pdf"],
+                key=f"history_upload_{case_id}"
+            )
+
+
+        if replacement_file:
+
+            st.caption(
+                f"Selected: **{replacement_file.name}**"
+            )
+
+            if st.button(
+                "📤 Upload & Extract Text",
+                type="primary",
+                use_container_width=True,
+                key=f"history_upload_button_{case_id}"
+            ):
+
+                try:
+
+                    # -----------------------------------------
+                    # Check for duplicate filename
+                    # -----------------------------------------
+
+                    duplicate = any(
+                        str(
+                            document.get(
+                                "document_name",
+                                ""
+                            )
+                        ).strip().lower()
+                        == replacement_file.name.strip().lower()
+                        for document in documents
+                    )
+
+                    if duplicate:
+
+                        st.error(
+                            f"A document named "
+                            f"'{replacement_file.name}' "
+                            f"is already uploaded for this case. "
+                            f"Remove the existing file first if "
+                            f"you want to replace it."
+                        )
+
+                        st.stop()
+
+
+                    # -----------------------------------------
+                    # Read PDF
+                    # -----------------------------------------
+
+                    reader = PdfReader(
+                        replacement_file
+                    )
+
+                    extracted_pages = []
+
+                    for page in reader.pages:
+
+                        text = page.extract_text()
+
+                        if text:
+
+                            extracted_pages.append(
+                                text
+                            )
+
+
+                    extracted_text = (
+                        "\n\n".join(
+                            extracted_pages
+                        )
+                    )
+
+
+                    # -----------------------------------------
+                    # Check Extracted Text
+                    # -----------------------------------------
+
+                    if not extracted_text.strip():
+
+                        st.error(
+                            "No selectable text was found in "
+                            "this PDF. OCR is not available "
+                            "in the current MVP."
+                        )
+
+                        st.stop()
+
+
+                    # -----------------------------------------
+                    # Save Document
+                    # -----------------------------------------
+
+                    upload_response = (
+                        supabase
+                        .table("documents")
+                        .insert({
+                            "case_id": case_id,
+                            "document_name": (
+                                replacement_file.name
+                            ),
+                            "document_type": (
+                                replacement_type
+                            ),
+                            "extracted_text": (
+                                extracted_text
+                            )
+                        })
+                        .execute()
+                    )
+
+
+                    if upload_response.data:
+
+                        st.session_state[
+                            "current_case_id"
+                        ] = case_id
+
+                        st.session_state[
+                            "documents_changed_case_id"
+                        ] = case_id
+
+                        st.success(
+                            f"{replacement_file.name} "
+                            f"uploaded successfully."
+                        )
+
+                        st.info(
+                            f"Extracted approximately "
+                            f"{len(extracted_text):,} "
+                            f"characters."
+                        )
+
+                        st.rerun()
+
+                    else:
+
+                        st.error(
+                            "Document could not be saved."
+                        )
+
+
+                except Exception as e:
+
+                    st.error(
+                        f"Error processing document: {e}"
+                    )
+
+
+        # -------------------------------------------------
+        # Open Case for Re-Review
+        # -------------------------------------------------
+
+        if (
+            st.session_state.get(
+                "documents_changed_case_id"
+            )
+            == case_id
+        ):
+
+            st.info(
+                "Documents for this case have changed. "
+                "Run a new AI Case Review before relying "
+                "on the previous AI assessment."
+            )
+
+            if st.button(
+                "📝 Open Case for New AI Review",
+                use_container_width=True,
+                key=f"open_case_for_review_{case_id}"
+            ):
+
+                st.session_state[
+                    "current_case_id"
+                ] = case_id
+
+                st.switch_page(
+                    "pages/2_Create_Case.py"
+                )
+
+
+        # -------------------------------------------------
         # AI Assessment Details
         # -------------------------------------------------
 
@@ -389,18 +792,26 @@ st.divider()
 nav_left, nav_right = st.columns([1, 1])
 
 with nav_left:
+
     if st.button(
         "← Decision",
         use_container_width=True,
         key="history_previous"
     ):
-        st.switch_page("pages/4_Decision.py")
+
+        st.switch_page(
+            "pages/4_Decision.py"
+        )
+
 
 with nav_right:
+
     if st.button(
         "Next: Report →",
         use_container_width=True,
         key="history_next"
     ):
-        st.switch_page("pages/6_Report.py")
-        
+
+        st.switch_page(
+            "pages/6_Report.py"
+        )
