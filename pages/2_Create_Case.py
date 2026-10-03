@@ -881,39 +881,66 @@ if "current_case_id" in st.session_state:
             )
 
 
-            # ---------------------------------------------
-            # SAVE FINAL AI REVIEW
-            # ---------------------------------------------
+# ---------------------------------------------
+# SAVE FINAL AI REVIEW
+# ---------------------------------------------
+#
+# Create the new complete review first.
+# Then remove older review records for this case.
+# This prevents duplicate ai_reviews when the user
+# presses Run / Resume again after completion.
+#
+ai_review_response = (
+    supabase
+    .table("ai_reviews")
+    .insert({
+        "case_id": case_id,
 
-            ai_review_response = (
-                supabase
-                .table("ai_reviews")
-                .insert({
-                    "case_id": case_id,
+        "compliance_result": compliance_text,
 
-                    "compliance_result": compliance_text,
+        "financial_result": financial_text,
 
-                    "financial_result": financial_text,
+        "risk_result": risk_text,
 
-                    "risk_result": risk_text,
+        "synthesis": synthesis_text,
 
-                    "synthesis": synthesis_text,
+        "recommendation": synthesis_text,
 
-                    "recommendation": synthesis_text,
+        "requirements": review.get(
+            "requirements",
+            []
+        ),
 
-                    "requirements": review.get(
-                        "requirements",
-                        []
-                    ),
+        "evidence_gate": review.get(
+            "evidence_gate",
+            {}
+        )
+    })
+    .execute()
+)
 
-                    "evidence_gate": review.get(
-                        "evidence_gate",
-                        {}
-                    )
-                })
-                .execute()
+if ai_review_response.data:
+
+    new_review_id = ai_review_response.data[0].get(
+        "id"
+    )
+
+    if new_review_id:
+
+        (
+            supabase
+            .table("ai_reviews")
+            .delete()
+            .eq(
+                "case_id",
+                case_id
             )
-
+            .neq(
+                "id",
+                new_review_id
+            )
+            .execute()
+        )
 
             # ---------------------------------------------
             # FINAL CHECK
