@@ -3,7 +3,7 @@ from google import genai
 from config.settings import get_gemini_api_key
 
 
-MODEL = "gemini-3.7-flash"
+MODEL = "gemini-3.8-flash"
 
 
 def run_financial_agent(
