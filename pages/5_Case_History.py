@@ -7,7 +7,7 @@ from pypdf import PdfReader
 st.set_page_config(
     page_title="Case History - AegisAI",
     page_icon="📚",
-    layout="wide"
+    layout="wide",
 )
 
 
@@ -19,11 +19,9 @@ if (
     "user" not in st.session_state
     or st.session_state["user"] is None
 ):
-
     st.warning(
         "Please log in from the main AegisAI page."
     )
-
     st.stop()
 
 
@@ -35,16 +33,87 @@ user = st.session_state["user"]
 # ---------------------------------------------------------
 
 try:
-
     supabase = get_supabase()
 
 except Exception as e:
-
     st.error(
         f"Unable to connect to Supabase: {e}"
     )
 
     st.stop()
+
+
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
+
+STEP_DEFINITIONS = [
+    ("RAG", "RAG Policy Retrieval"),
+    ("COMPLIANCE", "Compliance Agent"),
+    ("FINANCIAL", "Financial Agent"),
+    ("RISK", "Risk Agent"),
+    ("SYNTHESIS", "Decision Synthesizer"),
+    ("EVIDENCE", "Evidence Gate"),
+]
+
+
+def reset_ai_review(case_id):
+    """
+    Invalidate the existing AI review whenever case evidence
+    changes.
+    """
+
+    supabase.table("ai_review_steps").delete().eq(
+        "case_id",
+        case_id,
+    ).execute()
+
+    supabase.table("ai_reviews").delete().eq(
+        "case_id",
+        case_id,
+    ).execute()
+
+
+def load_review_steps(case_id):
+    try:
+        response = (
+            supabase
+            .table("ai_review_steps")
+            .select("*")
+            .eq(
+                "case_id",
+                case_id,
+            )
+            .order(
+                "step_order",
+            )
+            .execute()
+        )
+
+        return response.data or []
+
+    except Exception:
+        return []
+
+
+def parse_evidence_gate(review):
+    gate = review.get(
+        "evidence_gate",
+        {},
+    )
+
+    if isinstance(gate, str):
+        try:
+            import json
+
+            gate = json.loads(gate)
+        except Exception:
+            gate = {}
+
+    if not isinstance(gate, dict):
+        gate = {}
+
+    return gate
 
 
 # ---------------------------------------------------------
@@ -67,18 +136,17 @@ st.divider()
 # ---------------------------------------------------------
 
 try:
-
     response = (
         supabase
         .table("cases")
         .select("*")
         .eq(
             "user_id",
-            user.id
+            user.id,
         )
         .order(
             "created_at",
-            desc=True
+            desc=True,
         )
         .execute()
     )
@@ -86,7 +154,6 @@ try:
     cases = response.data or []
 
 except Exception as e:
-
     st.error(
         f"Unable to load case history: {e}"
     )
@@ -106,28 +173,24 @@ if not cases:
 
     st.divider()
 
-    nav_left, nav_right = st.columns([1, 1])
+    nav_left, nav_right = st.columns(2)
 
     with nav_left:
-
         if st.button(
             "← Decision",
             use_container_width=True,
-            key="history_previous_empty"
+            key="history_previous_empty",
         ):
-
             st.switch_page(
                 "pages/4_Decision.py"
             )
 
     with nav_right:
-
         if st.button(
             "Next: Report →",
             use_container_width=True,
-            key="history_next_empty"
+            key="history_next_empty",
         ):
-
             st.switch_page(
                 "pages/6_Report.py"
             )
@@ -167,34 +230,31 @@ rejected_cases = sum(
     ).upper() == "REJECTED"
 )
 
+
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-
     st.metric(
         "Total Cases",
-        total_cases
+        total_cases,
     )
 
 with col2:
-
     st.metric(
         "Approved",
-        approved_cases
+        approved_cases,
     )
 
 with col3:
-
     st.metric(
         "Returned",
-        returned_cases
+        returned_cases,
     )
 
 with col4:
-
     st.metric(
         "Rejected",
-        rejected_cases
+        rejected_cases,
     )
 
 
@@ -207,6 +267,7 @@ st.divider()
 
 st.subheader("🗂️ Approval Cases")
 
+
 for case in cases:
 
     case_id = case["id"]
@@ -217,15 +278,14 @@ for case in cases:
 
     amount = case.get(
         "amount",
-        0
+        0,
     )
 
     try:
-
-        amount_display = f"PKR {float(amount):,.0f}"
-
+        amount_display = (
+            f"PKR {float(amount):,.0f}"
+        )
     except (TypeError, ValueError):
-
         amount_display = "PKR N/A"
 
 
@@ -234,27 +294,27 @@ for case in cases:
     # -----------------------------------------------------
 
     try:
-
         review_response = (
             supabase
             .table("ai_reviews")
             .select("*")
             .eq(
                 "case_id",
-                case_id
+                case_id,
             )
             .order(
                 "created_at",
-                desc=True
+                desc=True,
             )
             .limit(1)
             .execute()
         )
 
-        reviews = review_response.data or []
+        reviews = (
+            review_response.data or []
+        )
 
     except Exception:
-
         reviews = []
 
 
@@ -270,27 +330,27 @@ for case in cases:
     # -----------------------------------------------------
 
     try:
-
         decision_response = (
             supabase
             .table("decisions")
             .select("*")
             .eq(
                 "case_id",
-                case_id
+                case_id,
             )
             .order(
                 "created_at",
-                desc=True
+                desc=True,
             )
             .limit(1)
             .execute()
         )
 
-        decisions = decision_response.data or []
+        decisions = (
+            decision_response.data or []
+        )
 
     except Exception:
-
         decisions = []
 
 
@@ -302,33 +362,46 @@ for case in cases:
 
 
     # -----------------------------------------------------
+    # Load Workflow Checkpoints
+    # -----------------------------------------------------
+
+    review_steps = load_review_steps(
+        case_id
+    )
+
+    step_status_map = {
+        step.get("step_name"): step.get(
+            "status",
+            "PENDING",
+        )
+        for step in review_steps
+    }
+
+
+    # -----------------------------------------------------
     # Case Header
     # -----------------------------------------------------
 
     with st.expander(
         f"{case.get('title', 'Untitled Case')} "
         f"— {amount_display}",
-        expanded=False
+        expanded=False,
     ):
 
         col1, col2, col3 = st.columns(3)
 
         with col1:
-
             st.write(
                 f"**Department:** "
                 f"{case.get('department', 'N/A')}"
             )
 
         with col2:
-
             st.write(
-                f"**Status:** "
-                f"{status}"
+                f"**Status:** {status}"
             )
 
         with col3:
-
             st.write(
                 f"**Created:** "
                 f"{case.get('created_at', 'N/A')}"
@@ -339,6 +412,67 @@ for case in cases:
 
 
         # -------------------------------------------------
+        # AI Workflow Status
+        # -------------------------------------------------
+
+        st.write("### 🔄 AI Review Workflow")
+
+        if review_steps:
+
+            completed_count = 0
+
+            for step_name, label in STEP_DEFINITIONS:
+
+                step_status = step_status_map.get(
+                    step_name,
+                    "PENDING",
+                )
+
+                if step_status == "COMPLETED":
+                    completed_count += 1
+
+                    st.success(
+                        f"✅ {label} — COMPLETED"
+                    )
+
+                elif step_status == "FAILED":
+
+                    st.error(
+                        f"❌ {label} — FAILED"
+                    )
+
+                elif step_status == "RUNNING":
+
+                    st.warning(
+                        f"🔄 {label} — RUNNING"
+                    )
+
+                else:
+
+                    st.info(
+                        f"⏳ {label} — PENDING"
+                    )
+
+            st.caption(
+                f"{completed_count}/"
+                f"{len(STEP_DEFINITIONS)} "
+                "workflow steps completed."
+            )
+
+        elif review:
+
+            st.success(
+                "✅ AI review completed."
+            )
+
+        else:
+
+            st.info(
+                "No AI review has been completed."
+            )
+
+
+        # -------------------------------------------------
         # AI Recommendation
         # -------------------------------------------------
 
@@ -346,13 +480,73 @@ for case in cases:
 
         ai_recommendation = review.get(
             "recommendation",
-            "No AI review available"
+            "No AI review available",
         )
 
         st.info(
             f"**AI Recommendation:** "
             f"{ai_recommendation}"
         )
+
+
+        # -------------------------------------------------
+        # Evidence Gate
+        # -------------------------------------------------
+
+        if review:
+
+            gate = parse_evidence_gate(
+                review
+            )
+
+            st.write("### 🔐 Evidence Gate")
+
+            if gate.get(
+                "complete",
+                False,
+            ):
+
+                st.success(
+                    "✅ Evidence Gate PASSED"
+                )
+
+            else:
+
+                missing_count = gate.get(
+                    "missing_count",
+                    0,
+                )
+
+                st.error(
+                    "🔴 Evidence Gate BLOCKED — "
+                    f"{missing_count} mandatory "
+                    "requirement(s) missing."
+                )
+
+
+                missing = gate.get(
+                    "missing",
+                    [],
+                )
+
+                if isinstance(
+                    missing,
+                    list,
+                ):
+
+                    for item in missing:
+
+                        st.write(
+                            f"❌ **"
+                            f"{item.get('name', 'Requirement')}"
+                            f"**"
+                        )
+
+                        if item.get("reason"):
+
+                            st.caption(
+                                item["reason"]
+                            )
 
 
         # -------------------------------------------------
@@ -401,10 +595,10 @@ for case in cases:
                 .select("*")
                 .eq(
                     "case_id",
-                    case_id
+                    case_id,
                 )
                 .order(
-                    "created_at"
+                    "created_at",
                 )
                 .execute()
             )
@@ -426,87 +620,98 @@ for case in cases:
 
             for index, document in enumerate(
                 documents,
-                start=1
+                start=1,
             ):
 
-                document_id = document.get("id")
+                document_id = document.get(
+                    "id"
+                )
 
                 document_name = document.get(
                     "document_name",
-                    "Unnamed document"
+                    "Unnamed document",
                 )
 
                 document_type = document.get(
                     "document_type",
-                    "Other"
+                    "Other",
                 )
 
-                col_info, col_remove = st.columns(
-                    [5, 1]
+                col_info, col_remove = (
+                    st.columns([5, 1])
                 )
+
 
                 with col_info:
 
                     st.write(
-                        f"**{index}. {document_name}**"
+                        f"**{index}. "
+                        f"{document_name}**"
                     )
 
                     st.caption(
-                        f"Document Type: {document_type}"
+                        f"Document Type: "
+                        f"{document_type}"
                     )
+
 
                 with col_remove:
 
                     if st.button(
                         "🗑️ Remove",
                         use_container_width=True,
-                        key=f"history_remove_document_{document_id}"
+                        key=(
+                            "history_remove_document_"
+                            f"{document_id}"
+                        ),
                     ):
 
                         try:
 
-                            delete_response = (
+                            (
                                 supabase
                                 .table("documents")
                                 .delete()
                                 .eq(
                                     "id",
-                                    document_id
+                                    document_id,
                                 )
                                 .eq(
                                     "case_id",
-                                    case_id
+                                    case_id,
                                 )
                                 .execute()
                             )
 
-                            if delete_response.data is not None:
 
-                                st.session_state[
-                                    "current_case_id"
-                                ] = case_id
+                            # Invalidate AI review because
+                            # evidence has changed.
+                            reset_ai_review(
+                                case_id
+                            )
 
-                                st.session_state[
-                                    "documents_changed_case_id"
-                                ] = case_id
 
-                                st.success(
-                                    f"{document_name} "
-                                    f"was removed successfully."
-                                )
+                            st.session_state[
+                                "current_case_id"
+                            ] = case_id
 
-                                st.rerun()
+                            st.session_state[
+                                "documents_changed_case_id"
+                            ] = case_id
 
-                            else:
+                            st.success(
+                                f"{document_name} "
+                                "was removed successfully."
+                            )
 
-                                st.error(
-                                    "The document could not be removed."
-                                )
+                            st.rerun()
+
 
                         except Exception as e:
 
                             st.error(
-                                f"Unable to remove document: {e}"
+                                "Unable to remove document: "
+                                f"{e}"
                             )
 
         else:
@@ -521,22 +726,25 @@ for case in cases:
         # Upload Replacement Document
         # -------------------------------------------------
 
-        st.write("### ➕ Upload / Replace Document")
+        st.write(
+            "### ➕ Upload / Replace Document"
+        )
+
 
         if review or human_decision:
 
             st.warning(
-                "This case already has an AI review or human "
-                "decision. Changing its documents will make "
-                "the existing AI assessment outdated. After "
-                "uploading or removing documents, open "
-                "Create Approval Case and run a new AI Case Review."
+                "Changing case documents invalidates "
+                "the existing AI assessment. A new AI "
+                "review is required before relying on "
+                "the updated case."
             )
 
 
-        upload_col1, upload_col2 = st.columns(
-            [2, 3]
+        upload_col1, upload_col2 = (
+            st.columns([2, 3])
         )
+
 
         with upload_col1:
 
@@ -549,66 +757,79 @@ for case in cases:
                     "Technical Evaluation",
                     "Comparative Statement",
                     "Approval Request",
-                    "Other"
+                    "Other",
                 ],
-                key=f"history_document_type_{case_id}"
+                key=(
+                    f"history_document_type_"
+                    f"{case_id}"
+                ),
             )
+
 
         with upload_col2:
 
             replacement_file = st.file_uploader(
                 "Select PDF document",
                 type=["pdf"],
-                key=f"history_upload_{case_id}"
+                key=(
+                    f"history_upload_"
+                    f"{case_id}"
+                ),
             )
 
 
         if replacement_file:
 
             st.caption(
-                f"Selected: **{replacement_file.name}**"
+                f"Selected: "
+                f"**{replacement_file.name}**"
             )
+
 
             if st.button(
                 "📤 Upload & Extract Text",
                 type="primary",
                 use_container_width=True,
-                key=f"history_upload_button_{case_id}"
+                key=(
+                    f"history_upload_button_"
+                    f"{case_id}"
+                ),
             ):
 
                 try:
 
-                    # -----------------------------------------
-                    # Check for duplicate filename
-                    # -----------------------------------------
+                    # -------------------------------------
+                    # Duplicate Filename Check
+                    # -------------------------------------
 
                     duplicate = any(
                         str(
                             document.get(
                                 "document_name",
-                                ""
+                                "",
                             )
                         ).strip().lower()
                         == replacement_file.name.strip().lower()
                         for document in documents
                     )
 
+
                     if duplicate:
 
                         st.error(
                             f"A document named "
                             f"'{replacement_file.name}' "
-                            f"is already uploaded for this case. "
-                            f"Remove the existing file first if "
-                            f"you want to replace it."
+                            "is already uploaded for this "
+                            "case. Remove the existing file "
+                            "first if you want to replace it."
                         )
 
                         st.stop()
 
 
-                    # -----------------------------------------
+                    # -------------------------------------
                     # Read PDF
-                    # -----------------------------------------
+                    # -------------------------------------
 
                     reader = PdfReader(
                         replacement_file
@@ -634,45 +855,54 @@ for case in cases:
                     )
 
 
-                    # -----------------------------------------
+                    # -------------------------------------
                     # Check Extracted Text
-                    # -----------------------------------------
+                    # -------------------------------------
 
                     if not extracted_text.strip():
 
                         st.error(
-                            "No selectable text was found in "
-                            "this PDF. OCR is not available "
+                            "No selectable text was found "
+                            "in this PDF. OCR is not available "
                             "in the current MVP."
                         )
 
                         st.stop()
 
 
-                    # -----------------------------------------
+                    # -------------------------------------
                     # Save Document
-                    # -----------------------------------------
+                    # -------------------------------------
 
                     upload_response = (
                         supabase
                         .table("documents")
-                        .insert({
-                            "case_id": case_id,
-                            "document_name": (
-                                replacement_file.name
-                            ),
-                            "document_type": (
-                                replacement_type
-                            ),
-                            "extracted_text": (
-                                extracted_text
-                            )
-                        })
+                        .insert(
+                            {
+                                "case_id": case_id,
+                                "document_name": (
+                                    replacement_file.name
+                                ),
+                                "document_type": (
+                                    replacement_type
+                                ),
+                                "extracted_text": (
+                                    extracted_text
+                                ),
+                            }
+                        )
                         .execute()
                     )
 
 
                     if upload_response.data:
+
+                        # Invalidate existing AI review
+                        # because evidence changed.
+                        reset_ai_review(
+                            case_id
+                        )
+
 
                         st.session_state[
                             "current_case_id"
@@ -684,13 +914,13 @@ for case in cases:
 
                         st.success(
                             f"{replacement_file.name} "
-                            f"uploaded successfully."
+                            "uploaded successfully."
                         )
 
                         st.info(
-                            f"Extracted approximately "
-                            f"{len(extracted_text):,} "
-                            f"characters."
+                            "Existing AI review has been "
+                            "invalidated. Run a new AI review "
+                            "for this updated evidence."
                         )
 
                         st.rerun()
@@ -723,13 +953,17 @@ for case in cases:
             st.info(
                 "Documents for this case have changed. "
                 "Run a new AI Case Review before relying "
-                "on the previous AI assessment."
+                "on the previous assessment."
             )
+
 
             if st.button(
                 "📝 Open Case for New AI Review",
                 use_container_width=True,
-                key=f"open_case_for_review_{case_id}"
+                key=(
+                    f"open_case_for_review_"
+                    f"{case_id}"
+                ),
             ):
 
                 st.session_state[
@@ -754,7 +988,7 @@ for case in cases:
                 st.write(
                     review.get(
                         "synthesis",
-                        "No synthesis available."
+                        "No synthesis available.",
                     )
                 )
 
@@ -770,7 +1004,7 @@ for case in cases:
             st.write(
                 case.get(
                     "description",
-                    "No description available."
+                    "No description available.",
                 )
             )
 
@@ -778,8 +1012,8 @@ for case in cases:
 st.divider()
 
 st.caption(
-    "AegisAI Case History — Human decisions are authoritative "
-    "and AI recommendations are advisory."
+    "AegisAI Case History — Human decisions are "
+    "authoritative and AI recommendations are advisory."
 )
 
 
@@ -789,14 +1023,15 @@ st.caption(
 
 st.divider()
 
-nav_left, nav_right = st.columns([1, 1])
+nav_left, nav_right = st.columns(2)
+
 
 with nav_left:
 
     if st.button(
         "← Decision",
         use_container_width=True,
-        key="history_previous"
+        key="history_previous",
     ):
 
         st.switch_page(
@@ -809,7 +1044,7 @@ with nav_right:
     if st.button(
         "Next: Report →",
         use_container_width=True,
-        key="history_next"
+        key="history_next",
     ):
 
         st.switch_page(
