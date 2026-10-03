@@ -1,9 +1,4 @@
-from google import genai
-
-from config.settings import get_gemini_api_key
-
-
-MODEL = "gemini-3.5-flash"
+from services.llm_router import generate_with_fallback
 
 
 def run_risk_agent(
@@ -11,10 +6,6 @@ def run_risk_agent(
     documents,
     policy_evidence
 ):
-    client = genai.Client(
-        api_key=get_gemini_api_key()
-    )
-
     document_text = "\n\n".join(
         [
             f"DOCUMENT: {doc['document_name']}\n"
@@ -66,19 +57,16 @@ IMPORTANT RULES:
   do not assume that the vendor has poor or good performance.
 - Do not treat the AI Agent's own assessment as evidence
   that a risk has been resolved.
-  - Do not assign HIGH risk solely because multiple documents are
-  missing.
-
+- Do not assign HIGH risk solely because multiple documents
+  are missing.
 - HIGH risk requires evidence of a significant confirmed risk,
   such as an identified conflict of interest, material financial
   discrepancy, documented vendor misconduct, confirmed policy
   violation, or other serious risk supported by the supplied
   evidence.
-
 - Missing documentation or inability to verify information should
   normally result in MEDIUM risk unless the missing information
   itself creates a clearly severe and confirmed risk.
-
 - Do not treat a pending approval as a confirmed governance
   violation. A case that has not yet reached approval may
   legitimately have no approval evidence yet.
@@ -175,9 +163,4 @@ require clarification, or require escalation.
 Do not provide a final human approval decision.
 """
 
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=prompt
-    )
-
-    return response.text
+    return generate_with_fallback(prompt)
