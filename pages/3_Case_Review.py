@@ -250,3 +250,26 @@ if (
     st.write(
         result["synthesis"]
     )
+# ---------------------------------------------------------
+# PAGE NAVIGATION
+# ---------------------------------------------------------
+
+st.divider()
+
+nav_left, nav_right = st.columns([1, 1])
+
+with nav_left:
+    if st.button(
+        "← Create Case",
+        use_container_width=True,
+        key="case_review_previous"
+    ):
+        st.switch_page("pages/2_Create_Case.py")
+
+with nav_right:
+    if st.button(
+        "Next: Decision →",
+        use_container_width=True,
+        key="case_review_next"
+    ):
+        st.switch_page("pages/4_Decision.py")
