@@ -147,3 +147,22 @@ st.caption(
     "AegisAI Dashboard — AI recommendations are advisory; "
     "human decisions are authoritative."
 )
+
+# ---------------------------------------------------------
+# PAGE NAVIGATION
+# ---------------------------------------------------------
+
+st.divider()
+
+nav_left, nav_right = st.columns([1, 1])
+
+with nav_left:
+    st.empty()
+
+with nav_right:
+    if st.button(
+        "Next: Create Case →",
+        use_container_width=True,
+        key="dashboard_next"
+    ):
+        st.switch_page("pages/2_Create_Case.py")
