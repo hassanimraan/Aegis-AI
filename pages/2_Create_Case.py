@@ -1,5 +1,7 @@
 import streamlit as st
 
+from datetime import datetime
+
 from services.ai_review import run_ai_case_review
 from pypdf import PdfReader
 
@@ -105,6 +107,30 @@ def reset_case_review(case_id):
         return False
 
 
+def parse_timestamp(value):
+    """
+    Convert a Supabase timestamp into a datetime object.
+    """
+
+    if not value:
+        return None
+
+    try:
+
+        timestamp = datetime.fromisoformat(
+            str(value).replace(
+                "Z",
+                "+00:00"
+            )
+        )
+
+        return timestamp
+
+    except Exception:
+
+        return None
+
+
 def record_evidence_change(
     case_id,
     user_id,
@@ -115,8 +141,9 @@ def record_evidence_change(
     """
     Records that case evidence changed.
 
-    If a previous human decision exists, the decision is
-    explicitly marked as superseded through the audit trail.
+    If a previous human decision exists and was recorded
+    before this evidence change, the decision is marked
+    as superseded through the audit trail.
 
     The case is returned to DRAFT status because the previous
     decision no longer applies to the changed evidence.
@@ -156,8 +183,14 @@ def record_evidence_change(
 
             return False
 
+        evidence_change_created_at = (
+            evidence_change_response.data[0].get(
+                "created_at"
+            )
+        )
+
         # -----------------------------------------------------
-        # Check whether a previous human decision exists
+        # Check previous human decision
         # -----------------------------------------------------
 
         decision_response = (
@@ -183,7 +216,8 @@ def record_evidence_change(
         )
 
         # -----------------------------------------------------
-        # Mark previous decision as superseded
+        # Determine whether the previous decision is older
+        # than the current evidence change.
         # -----------------------------------------------------
 
         if previous_decisions:
@@ -203,24 +237,52 @@ def record_evidence_change(
                 )
             )
 
-            (
-                supabase
-                .table("audit_logs")
-                .insert({
-                    "case_id": case_id,
-                    "user_id": user_id,
-                    "action": "DECISION_SUPERSEDED",
-                    "details": (
-                        "Previous human decision "
-                        f"{previous_decision_value} "
-                        f"(Decision ID: "
-                        f"{previous_decision_id}) "
-                        "was superseded because "
-                        "case evidence changed."
-                    ),
-                })
-                .execute()
+            previous_decision_created_at = (
+                previous_decision.get(
+                    "created_at"
+                )
             )
+
+            should_supersede = True
+
+            decision_time = parse_timestamp(
+                previous_decision_created_at
+            )
+
+            evidence_change_time = parse_timestamp(
+                evidence_change_created_at
+            )
+
+            if (
+                decision_time
+                and evidence_change_time
+            ):
+
+                should_supersede = (
+                    evidence_change_time
+                    > decision_time
+                )
+
+            if should_supersede:
+
+                (
+                    supabase
+                    .table("audit_logs")
+                    .insert({
+                        "case_id": case_id,
+                        "user_id": user_id,
+                        "action": "DECISION_SUPERSEDED",
+                        "details": (
+                            "Previous human decision "
+                            f"{previous_decision_value} "
+                            f"(Decision ID: "
+                            f"{previous_decision_id}) "
+                            "was superseded because "
+                            "case evidence changed."
+                        ),
+                    })
+                    .execute()
+                )
 
         # -----------------------------------------------------
         # Return case to DRAFT
@@ -249,6 +311,9 @@ def record_evidence_change(
         )
 
         return False
+
+
+def get_review_steps(case_id):
     """
     Load persistent AI workflow checkpoints.
     """
@@ -278,7 +343,7 @@ def record_evidence_change(
 
 def step_status_map(case_id):
     """
-    Convert checkpoint records into:
+    Convert checkpoint records into a dictionary:
 
         {
             "RAG": {...},
@@ -628,7 +693,6 @@ if "current_case_id" in st.session_state:
         "current_case_id"
     ]
 
-
     # =====================================================
     # 2. DOCUMENT UPLOAD
     # =====================================================
@@ -721,11 +785,6 @@ if "current_case_id" in st.session_state:
                 )
 
                 if response.data:
-
-                    # -------------------------------------------------
-                    # Evidence has changed.
-                    # Existing AI analysis is no longer valid.
-                    # -------------------------------------------------
 
                     audit_recorded = record_evidence_change(
                         case_id=case_id,
@@ -878,11 +937,6 @@ if "current_case_id" in st.session_state:
 
                             if delete_response.data:
 
-                                # -------------------------------------------------
-                                # Evidence has changed.
-                                # Existing AI analysis is no longer valid.
-                                # -------------------------------------------------
-
                                 audit_recorded = record_evidence_change(
                                     case_id=case_id,
                                     user_id=user.id,
@@ -970,7 +1024,6 @@ if "current_case_id" in st.session_state:
         "resumes from the last incomplete step."
     )
 
-
     # -----------------------------------------------------
     # SHOW EXISTING PROGRESS
     # -----------------------------------------------------
@@ -986,7 +1039,6 @@ if "current_case_id" in st.session_state:
         )
 
         st.divider()
-
 
     # -----------------------------------------------------
     # REVIEW CONTROLS
@@ -1013,7 +1065,6 @@ if "current_case_id" in st.session_state:
             key="restart_ai_case_review"
         )
 
-
     # -----------------------------------------------------
     # EXPLICIT RESTART
     # -----------------------------------------------------
@@ -1030,7 +1081,6 @@ if "current_case_id" in st.session_state:
             )
 
             st.rerun()
-
 
     # -----------------------------------------------------
     # RUN / RESUME REVIEW
@@ -1066,7 +1116,6 @@ if "current_case_id" in st.session_state:
 
                 st.stop()
 
-
             # ---------------------------------------------
             # LOAD DOCUMENTS
             # ---------------------------------------------
@@ -1089,6 +1138,14 @@ if "current_case_id" in st.session_state:
                 document_response.data or []
             )
 
+            if not current_documents:
+
+                st.warning(
+                    "Please upload at least one supporting "
+                    "document before running the AI review."
+                )
+
+                st.stop()
 
             # ---------------------------------------------
             # RUN WORKFLOW
@@ -1113,7 +1170,6 @@ if "current_case_id" in st.session_state:
                 current_documents
             )
 
-
             # ---------------------------------------------
             # STORE COMPLETE REVIEW IN SESSION
             # ---------------------------------------------
@@ -1125,7 +1181,6 @@ if "current_case_id" in st.session_state:
             st.session_state[
                 "ai_case_review_id"
             ] = case_id
-
 
             # ---------------------------------------------
             # EXTRACT FINAL TEXT RESULTS
@@ -1147,38 +1202,24 @@ if "current_case_id" in st.session_state:
                 review.get("synthesis")
             )
 
-
             # ---------------------------------------------
             # SAVE FINAL AI REVIEW
             # ---------------------------------------------
-            #
-            # Create the new complete review first.
-            # Then remove older review records for this case.
-            # This prevents duplicate ai_reviews when the user
-            # presses Run / Resume again after completion.
-            #
 
             ai_review_response = (
                 supabase
                 .table("ai_reviews")
                 .insert({
                     "case_id": case_id,
-
                     "compliance_result": compliance_text,
-
                     "financial_result": financial_text,
-
                     "risk_result": risk_text,
-
                     "synthesis": synthesis_text,
-
                     "recommendation": synthesis_text,
-
                     "requirements": review.get(
                         "requirements",
                         []
                     ),
-
                     "evidence_gate": review.get(
                         "evidence_gate",
                         {}
@@ -1212,7 +1253,6 @@ if "current_case_id" in st.session_state:
                         .execute()
                     )
 
-
             # ---------------------------------------------
             # FINAL CHECK
             # ---------------------------------------------
@@ -1241,7 +1281,6 @@ if "current_case_id" in st.session_state:
 
                 st.rerun()
 
-
         except Exception as error:
 
             st.error(
@@ -1257,7 +1296,6 @@ if "current_case_id" in st.session_state:
             display_review_progress(
                 case_id
             )
-
 
     # =====================================================
     # DISPLAY CURRENT AI REVIEW
@@ -1320,7 +1358,6 @@ if "current_case_id" in st.session_state:
                 "No mandatory evidence requirements were "
                 "identified from the retrieved policy evidence."
             )
-
 
         # =================================================
         # EVIDENCE GATE
