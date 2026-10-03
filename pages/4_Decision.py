@@ -851,3 +851,26 @@ else:
             st.error(
                 f"Unable to save the human decision: {e}"
             )
+# ---------------------------------------------------------
+# PAGE NAVIGATION
+# ---------------------------------------------------------
+
+st.divider()
+
+nav_left, nav_right = st.columns([1, 1])
+
+with nav_left:
+    if st.button(
+        "← Create Case",
+        use_container_width=True,
+        key="decision_previous"
+    ):
+        st.switch_page("pages/2_Create_Case.py")
+
+with nav_right:
+    if st.button(
+        "Next: Case History →",
+        use_container_width=True,
+        key="decision_next"
+    ):
+        st.switch_page("pages/5_Case_History.py")
