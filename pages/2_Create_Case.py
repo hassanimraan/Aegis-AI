@@ -616,4 +616,26 @@ if (
                 st.caption(
                     item["reason"]
                 )
-```
+# ---------------------------------------------------------
+# PAGE NAVIGATION
+# ---------------------------------------------------------
+
+st.divider()
+
+nav_left, nav_right = st.columns([1, 1])
+
+with nav_left:
+    if st.button(
+        "← Dashboard",
+        use_container_width=True,
+        key="create_case_previous"
+    ):
+        st.switch_page("pages/1_Dashboard.py")
+
+with nav_right:
+    if st.button(
+        "Next: Decision →",
+        use_container_width=True,
+        key="create_case_next"
+    ):
+        st.switch_page("pages/4_Decision.py")
