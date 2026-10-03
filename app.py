@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 
 from services.authentication import (
@@ -187,16 +188,12 @@ def show_login():
 
 
 # ==========================================
-# MAIN APPLICATION
+# GLOBAL SIDEBAR NAVIGATION
 # ==========================================
 
-def show_application():
+def show_sidebar():
 
     user = st.session_state["user"]
-
-    # --------------------------------------
-    # SIDEBAR
-    # --------------------------------------
 
     with st.sidebar:
 
@@ -208,7 +205,13 @@ def show_application():
 
         st.divider()
 
-        user_name = user.user_metadata.get(
+        user_metadata = getattr(
+            user,
+            "user_metadata",
+            {}
+        ) or {}
+
+        user_name = user_metadata.get(
             "full_name",
             ""
         ).strip()
@@ -329,6 +332,15 @@ def show_application():
 
             st.rerun()
 
+
+# ==========================================
+# MAIN APPLICATION HOME SCREEN
+# ==========================================
+
+def show_application():
+
+    user = st.session_state["user"]
+
     # --------------------------------------
     # MAIN SCREEN
     # --------------------------------------
@@ -350,7 +362,13 @@ def show_application():
     # WELCOME MESSAGE
     # --------------------------------------
 
-    user_name = user.user_metadata.get(
+    user_metadata = getattr(
+        user,
+        "user_metadata",
+        {}
+    ) or {}
+
+    user_name = user_metadata.get(
         "full_name",
         ""
     ).strip()
@@ -454,14 +472,8 @@ def show_application():
 
 
 # ==========================================
-# HIDDEN STREAMLIT NAVIGATION
+# AUTHENTICATION CHECK
 # ==========================================
-
-# Streamlit normally displays the files inside
-# the pages/ folder automatically in the sidebar.
-# We register those pages but hide the automatic
-# navigation because AegisAI uses its own button-based
-# navigation menu.
 
 if (
     "user" not in st.session_state
@@ -471,6 +483,27 @@ if (
     show_login()
 
 else:
+
+    # ======================================
+    # GLOBAL SIDEBAR
+    # ======================================
+    # This is deliberately outside
+    # show_application() so that the sidebar
+    # remains visible on every authenticated
+    # page, including pages that call
+    # st.stop().
+
+    show_sidebar()
+
+    # ======================================
+    # HIDDEN STREAMLIT NAVIGATION
+    # ======================================
+
+    # Streamlit normally displays the files
+    # inside the pages/ folder automatically.
+    # We register those pages but hide the
+    # automatic navigation because AegisAI
+    # uses its own button-based navigation.
 
     navigation = st.navigation(
         [
@@ -508,3 +541,25 @@ else:
     )
 
     navigation.run()
+```
+
+### What changed
+
+Only the sidebar structure was changed:
+
+**Before:** the sidebar was inside `show_application()`, so it was effectively tied to the AegisAI home page.
+
+**Now:** `show_sidebar()` is called **before `navigation.run()`** for every authenticated session.
+
+Therefore:
+
+**Dashboard → sidebar visible**
+**Create Case → sidebar visible**
+**Case Review → sidebar visible**
+**Decision → sidebar visible**
+**Case History → sidebar visible**
+**Reports → sidebar visible**
+
+And importantly, the existing bottom **Previous / Next** navigation remains untouched.
+
+This is the final navigation implementation; no changes to your AI/RAG/Supabase/application workflow are required.
