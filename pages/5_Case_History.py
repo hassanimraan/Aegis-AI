@@ -35,12 +35,12 @@ user = st.session_state["user"]
 # ---------------------------------------------------------
 
 try:
-supabase = get_supabase()
+    supabase = get_supabase()
 
 except Exception as e:
-st.error(
-f"Unable to connect to Supabase: {e}"
-)
+    st.error(
+    f"Unable to connect to Supabase: {e}"
+    )
 st.stop()
 
 # ---------------------------------------------------------
