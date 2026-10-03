@@ -288,10 +288,13 @@ def show_application():
 
     st.divider()
 
-    st.success(
-        f"Welcome, {user.email}"
-    )
-
+    user_name = user.user_metadata.get("full_name", "").strip()
+    
+    if user_name:
+        st.success(f"Welcome, {user_name}")
+    else:
+        st.success(f"Welcome, {user.email}")
+        
     st.subheader(
         "Approval Management"
     )
