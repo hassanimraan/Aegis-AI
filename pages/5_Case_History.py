@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import streamlit as st
 
 from database.supabase_client import get_supabase
@@ -47,6 +49,104 @@ except Exception as e:
 # Helpers
 # ---------------------------------------------------------
 
+def parse_timestamp(value):
+    """
+    Convert a Supabase timestamp into a timezone-aware datetime.
+    """
+
+    if not value:
+        return None
+
+    try:
+
+        timestamp = datetime.fromisoformat(
+            str(value).replace(
+                "Z",
+                "+00:00"
+            )
+        )
+
+        if timestamp.tzinfo is None:
+
+            timestamp = timestamp.replace(
+                tzinfo=timezone.utc
+            )
+
+        return timestamp
+
+    except Exception:
+
+        return None
+
+
+def load_latest_evidence_change(case_id):
+    """
+    Load the most recent evidence-change event.
+    """
+
+    try:
+
+        response = (
+            supabase
+            .table("audit_logs")
+            .select(
+                "id, action, details, created_at"
+            )
+            .eq(
+                "case_id",
+                case_id
+            )
+            .eq(
+                "action",
+                "EVIDENCE_CHANGED"
+            )
+            .order(
+                "created_at",
+                desc=True
+            )
+            .limit(1)
+            .execute()
+        )
+
+        records = response.data or []
+
+        if records:
+
+            return records[0]
+
+    except Exception:
+
+        pass
+
+    return None
+
+
+def decision_is_superseded(
+    decision,
+    evidence_change
+):
+    """
+    Determine whether evidence changed after the decision.
+    """
+
+    if not decision or not evidence_change:
+
+        return False
+
+    decision_time = parse_timestamp(
+        decision.get("created_at")
+    )
+
+    evidence_change_time = parse_timestamp(
+        evidence_change.get("created_at")
+    )
+
+    if not decision_time or not evidence_change_time:
+
+        return False
+
+    return evidence_change_time > decision_time
+    
 STEP_DEFINITIONS = [
     ("RAG", "RAG Policy Retrieval"),
     ("COMPLIANCE", "Compliance Agent"),
@@ -549,35 +649,78 @@ for case in cases:
                             )
 
 
-        # -------------------------------------------------
-        # Human Decision
-        # -------------------------------------------------
+# -------------------------------------------------
+# Human Decision
+# -------------------------------------------------
 
-        st.write("### 👤 Human Decision")
+st.write(
+    "### 👤 Human Decision"
+)
 
-        if human_decision:
+latest_evidence_change = (
+    load_latest_evidence_change(
+        case_id
+    )
+)
 
-            st.success(
-                f"**Decision:** "
-                f"{human_decision.get('decision', 'N/A')}"
-            )
+decision_superseded = (
+    decision_is_superseded(
+        human_decision,
+        latest_evidence_change
+    )
+)
 
-            st.write(
-                f"**Decision Date:** "
-                f"{human_decision.get('created_at', 'N/A')}"
-            )
+if human_decision:
 
-            st.write(
-                f"**Reviewer Comments:** "
-                f"{human_decision.get('comments') or 'None'}"
-            )
+    if decision_superseded:
 
-        else:
+        st.warning(
+            "⚠️ **SUPERSEDED DECISION**"
+        )
 
-            st.warning(
-                "No human decision has been recorded."
-            )
+        st.write(
+            f"**Previous Decision:** "
+            f"{human_decision.get('decision', 'N/A')}"
+        )
 
+        st.write(
+            f"**Decision Date:** "
+            f"{human_decision.get('created_at', 'N/A')}"
+        )
+
+        st.write(
+            f"**Reviewer Comments:** "
+            f"{human_decision.get('comments') or 'None'}"
+        )
+
+        st.info(
+            "This decision remains in the historical record "
+            "but no longer applies because the case evidence "
+            "changed after the decision was recorded."
+        )
+
+    else:
+
+        st.success(
+            f"**Current Decision:** "
+            f"{human_decision.get('decision', 'N/A')}"
+        )
+
+        st.write(
+            f"**Decision Date:** "
+            f"{human_decision.get('created_at', 'N/A')}"
+        )
+
+        st.write(
+            f"**Reviewer Comments:** "
+            f"{human_decision.get('comments') or 'None'}"
+        )
+
+else:
+
+    st.warning(
+        "No human decision has been recorded."
+    )
 
         # -------------------------------------------------
         # Case Documents
