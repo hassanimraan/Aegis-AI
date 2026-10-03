@@ -1,6 +1,8 @@
 streamlit
 supabase
 google-genai
+groq
+openai
 pypdf
 pandas
 numpy
