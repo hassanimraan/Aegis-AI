@@ -6,6 +6,7 @@ from services.authentication import (
     logout_user
 )
 
+
 st.set_page_config(
     page_title="AegisAI",
     page_icon="🛡️",
@@ -207,53 +208,105 @@ def show_application():
 
         st.divider()
 
-        st.write(
-            f"**User:** {user.email}"
-        )
+        user_name = user.user_metadata.get(
+            "full_name",
+            ""
+        ).strip()
+
+        if user_name:
+
+            st.write(
+                f"**User:** {user_name}"
+            )
+
+        else:
+
+            st.write(
+                f"**User:** {user.email}"
+            )
 
         st.divider()
 
         st.subheader("Navigation")
 
+        # ----------------------------------
+        # DASHBOARD
+        # ----------------------------------
+
         if st.button(
             "📊 Dashboard",
-            use_container_width=True
+            use_container_width=True,
+            key="nav_dashboard"
         ):
 
             st.switch_page(
                 "pages/1_Dashboard.py"
             )
 
+        # ----------------------------------
+        # CREATE CASE
+        # ----------------------------------
+
         if st.button(
             "📝 Create Approval Case",
-            use_container_width=True
+            use_container_width=True,
+            key="nav_create_case"
         ):
 
             st.switch_page(
                 "pages/2_Create_Case.py"
             )
 
+        # ----------------------------------
+        # CASE REVIEW
+        # ----------------------------------
+
+        if st.button(
+            "🔎 Case Review",
+            use_container_width=True,
+            key="nav_case_review"
+        ):
+
+            st.switch_page(
+                "pages/3_Case_Review.py"
+            )
+
+        # ----------------------------------
+        # DECISION
+        # ----------------------------------
+
         if st.button(
             "⚖️ Decision",
-            use_container_width=True
+            use_container_width=True,
+            key="nav_decision"
         ):
 
             st.switch_page(
                 "pages/4_Decision.py"
             )
 
+        # ----------------------------------
+        # CASE HISTORY
+        # ----------------------------------
+
         if st.button(
             "📁 Case History",
-            use_container_width=True
+            use_container_width=True,
+            key="nav_case_history"
         ):
 
             st.switch_page(
                 "pages/5_Case_History.py"
             )
 
+        # ----------------------------------
+        # REPORT
+        # ----------------------------------
+
         if st.button(
             "📄 Reports",
-            use_container_width=True
+            use_container_width=True,
+            key="nav_reports"
         ):
 
             st.switch_page(
@@ -262,9 +315,14 @@ def show_application():
 
         st.divider()
 
+        # ----------------------------------
+        # LOGOUT
+        # ----------------------------------
+
         if st.button(
             "Logout",
-            use_container_width=True
+            use_container_width=True,
+            key="nav_logout"
         ):
 
             logout_user()
@@ -288,13 +346,27 @@ def show_application():
 
     st.divider()
 
-    user_name = user.user_metadata.get("full_name", "").strip()
-    
+    # --------------------------------------
+    # WELCOME MESSAGE
+    # --------------------------------------
+
+    user_name = user.user_metadata.get(
+        "full_name",
+        ""
+    ).strip()
+
     if user_name:
-        st.success(f"Welcome, {user_name}")
+
+        st.success(
+            f"Welcome, {user_name}"
+        )
+
     else:
-        st.success(f"Welcome, {user.email}")
-        
+
+        st.success(
+            f"Welcome, {user.email}"
+        )
+
     st.subheader(
         "Approval Management"
     )
@@ -318,7 +390,8 @@ def show_application():
 
         if st.button(
             "Open Dashboard",
-            use_container_width=True
+            use_container_width=True,
+            key="home_dashboard"
         ):
 
             st.switch_page(
@@ -343,7 +416,8 @@ def show_application():
         if st.button(
             "➕ Create New Case",
             type="primary",
-            use_container_width=True
+            use_container_width=True,
+            key="home_create_case"
         ):
 
             st.switch_page(
@@ -380,8 +454,14 @@ def show_application():
 
 
 # ==========================================
-# ENTRY POINT
+# HIDDEN STREAMLIT NAVIGATION
 # ==========================================
+
+# Streamlit normally displays the files inside
+# the pages/ folder automatically in the sidebar.
+# We register those pages but hide the automatic
+# navigation because AegisAI uses its own button-based
+# navigation menu.
 
 if (
     "user" not in st.session_state
@@ -392,4 +472,39 @@ if (
 
 else:
 
-    show_application()
+    navigation = st.navigation(
+        [
+            st.Page(
+                show_application,
+                title="AegisAI",
+                url_path="app"
+            ),
+            st.Page(
+                "pages/1_Dashboard.py",
+                title="Dashboard"
+            ),
+            st.Page(
+                "pages/2_Create_Case.py",
+                title="Create Case"
+            ),
+            st.Page(
+                "pages/3_Case_Review.py",
+                title="Case Review"
+            ),
+            st.Page(
+                "pages/4_Decision.py",
+                title="Decision"
+            ),
+            st.Page(
+                "pages/5_Case_History.py",
+                title="Case History"
+            ),
+            st.Page(
+                "pages/6_Report.py",
+                title="Report"
+            ),
+        ],
+        position="hidden"
+    )
+
+    navigation.run()
