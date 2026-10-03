@@ -634,8 +634,8 @@ with nav_left:
 
 with nav_right:
     if st.button(
-        "Next: Decision →",
+        "Next: Case Review →",
         use_container_width=True,
         key="create_case_next"
     ):
-        st.switch_page("pages/4_Decision.py")
+        st.switch_page("pages/3_Case_Review.py")
