@@ -113,21 +113,46 @@ def get_case_id(case):
 
 def normalize_result(value):
     """
-    Convert an AI/review result into a dictionary when possible.
+    Normalize an AI result while preserving plain-text AI output.
+
+    Database values may be:
+    - JSON/dict
+    - JSON-encoded string
+    - Plain-text AI assessment
+
+    Plain-text results are returned as:
+        {"text": "..."}
     """
+
     if value is None:
         return {}
 
     if isinstance(value, dict):
         return value
 
+    if isinstance(value, list):
+        return {"items": value}
+
     if isinstance(value, str):
-        parsed = parse_json(value, {})
+        text = value.strip()
+
+        if not text:
+            return {}
+
+        parsed = parse_json(text, None)
 
         if isinstance(parsed, dict):
             return parsed
 
-    return {}
+        if isinstance(parsed, list):
+            return {"items": parsed}
+
+        # IMPORTANT:
+        # AI results in ai_reviews are currently stored as
+        # plain text inside JSONB columns.
+        return {"text": text}
+
+    return {"text": str(value)}
 
 
 def result_text(result):
@@ -141,6 +166,7 @@ def result_text(result):
     - structured dictionaries
     - lists
     """
+
     if result is None:
         return "No assessment available."
 
@@ -152,7 +178,7 @@ def result_text(result):
 
         parsed = parse_json(text, None)
 
-        if isinstance(parsed, dict):
+        if isinstance(parsed, (dict, list)):
             return result_text(parsed)
 
         return text
@@ -177,6 +203,16 @@ def result_text(result):
 
     if not isinstance(result, dict):
         return safe_text(result)
+
+    # Plain-text result stored by normalize_result()
+    if result.get("text"):
+        return safe_text(
+            result.get("text"),
+            "No assessment available.",
+        )
+
+    if "items" in result:
+        return result_text(result.get("items"))
 
     preferred_keys = [
         "assessment",
@@ -281,27 +317,25 @@ def result_text(result):
 
 def extract_assessment(review, field_name):
     """
-    Retrieve a saved agent assessment from ai_reviews.
+    Retrieve an agent assessment from ai_reviews.
 
-    Current schema:
-        compliance
-        financial
-        risk
-
-    Legacy compatibility:
+    Current database schema:
         compliance_result
         financial_result
         risk_result
+
+    The values may contain plain-text AI output.
     """
+
     if not review:
         return {}
 
-    value = review.get(field_name)
+    value = review.get(
+        f"{field_name}_result"
+    )
 
     if value is None:
-        value = review.get(
-            f"{field_name}_result"
-        )
+        value = review.get(field_name)
 
     return normalize_result(value)
 
@@ -309,7 +343,11 @@ def extract_assessment(review, field_name):
 def extract_synthesis(review):
     """
     Retrieve the Decision Synthesizer result.
+
+    Current database field:
+        synthesis
     """
+
     if not review:
         return {}
 
@@ -318,53 +356,255 @@ def extract_synthesis(review):
     )
 
 
-def get_recommendation(review, synthesis_result):
+def extract_ai_recommendation(review, synthesis_result):
     """
-    Return the concise AI recommendation.
+    Extract the concise AI recommendation.
 
-    The review.recommendation field may contain the complete
-    synthesis text beginning with OVERALL STATUS. In that case,
-    prefer the structured recommendation from synthesis.
+    Current Case #12 stores the complete synthesis text
+    in the recommendation field. Therefore, first try
+    structured synthesis fields, then parse the plain text.
     """
-    recommendation = safe_text(
-        review.get("recommendation"),
-        "",
-    )
 
-    synthesis_recommendation = (
-        synthesis_result.get("ai_recommendation")
-        or synthesis_result.get("recommendation")
-    )
+    if not review:
+        return "N/A"
 
-    if synthesis_recommendation:
-        return safe_text(
-            synthesis_recommendation,
-            "N/A",
+    # Structured synthesis result
+    if isinstance(synthesis_result, dict):
+        structured = (
+            synthesis_result.get("ai_recommendation")
+            or synthesis_result.get("recommendation")
         )
 
+        if structured:
+            return safe_text(
+                structured,
+                "N/A",
+            )
+
+        synthesis_text = synthesis_result.get("text")
+
+        if synthesis_text:
+            parsed = extract_recommendation_from_text(
+                synthesis_text
+            )
+
+            if parsed:
+                return parsed
+
+    # Database recommendation field
+    recommendation = review.get("recommendation")
+
     if recommendation:
-        if recommendation.upper().startswith(
-            "OVERALL STATUS:"
-        ):
-            for line in recommendation.splitlines():
-                cleaned = line.strip()
+        recommendation_text = safe_text(
+            recommendation,
+            "",
+        )
 
-                if cleaned.upper().startswith(
-                    "AI RECOMMENDATION:"
-                ):
-                    return cleaned.split(
-                        ":", 1
-                    )[1].strip()
+        parsed = extract_recommendation_from_text(
+            recommendation_text
+        )
 
-        return recommendation
+        if parsed:
+            return parsed
+
+        return recommendation_text
 
     return "N/A"
 
 
+def extract_recommendation_from_text(text):
+    """
+    Extract:
+        AI RECOMMENDATION: ...
+    from plain-text synthesis.
+    """
+
+    if not text:
+        return ""
+
+    for line in str(text).splitlines():
+        cleaned = line.strip()
+
+        if cleaned.upper().startswith(
+            "AI RECOMMENDATION:"
+        ):
+            return cleaned.split(
+                ":",
+                1,
+            )[1].strip()
+
+    return ""
+
+
+def extract_synthesis_section(
+    synthesis_result,
+    section_name,
+):
+    """
+    Extract a named section from structured synthesis.
+
+    For plain-text synthesis, section extraction is handled
+    separately because the current database stores the
+    complete synthesis as plain text.
+    """
+
+    if not synthesis_result:
+        return ""
+
+    if not isinstance(synthesis_result, dict):
+        return ""
+
+    value = synthesis_result.get(section_name)
+
+    if value is None:
+        return ""
+
+    return value
+
+
+def extract_plain_text_section(
+    text,
+    heading,
+    next_headings=None,
+):
+    """
+    Extract a section from the current plain-text
+    Decision Synthesizer output.
+
+    Example:
+        EXECUTIVE SUMMARY:
+        ...
+
+    until the next recognized heading.
+    """
+
+    if not text:
+        return ""
+
+    if next_headings is None:
+        next_headings = []
+
+    lines = str(text).splitlines()
+
+    target = heading.strip().upper()
+
+    start_index = None
+
+    for index, line in enumerate(lines):
+        cleaned = line.strip()
+
+        if cleaned.upper() == target:
+            start_index = index + 1
+            break
+
+    if start_index is None:
+        return ""
+
+    collected = []
+
+    for line in lines[start_index:]:
+        cleaned = line.strip()
+
+        if cleaned.upper() in [
+            item.strip().upper()
+            for item in next_headings
+        ]:
+            break
+
+        collected.append(line)
+
+    while collected and not collected[0].strip():
+        collected.pop(0)
+
+    while collected and not collected[-1].strip():
+        collected.pop()
+
+    return "\n".join(collected).strip()
+
+
+def get_synthesis_text(synthesis_result):
+    """
+    Return the complete plain-text synthesis when present.
+    """
+
+    if not synthesis_result:
+        return ""
+
+    if isinstance(synthesis_result, dict):
+        text = synthesis_result.get("text")
+
+        if text:
+            return safe_text(text, "")
+
+    return result_text(synthesis_result)
+
+
+def get_synthesis_section(
+    synthesis_result,
+    section_heading,
+    next_headings,
+):
+    """
+    Read a synthesis section from either structured data
+    or the current plain-text database format.
+    """
+
+    structured_key_map = {
+        "EXECUTIVE SUMMARY:": "executive_summary",
+        "COMPLIANCE ASSESSMENT:": "compliance_assessment",
+        "FINANCIAL ASSESSMENT:": "financial_assessment",
+        "RISK ASSESSMENT:": "risk_assessment",
+        "KEY FINDINGS:": "key_findings",
+        "MISSING OR UNCLEAR INFORMATION:":
+            "missing_or_unclear_information",
+        "CRITICAL POLICY / CONTROL ISSUES:":
+            "critical_policy_control_issues",
+        "CRITICAL POLICY / CONTROL ISSUES":
+            "critical_policy_control_issues",
+        "RECOMMENDATION REASON:":
+            "recommendation_reason",
+        "REQUIRED ACTIONS BEFORE FINAL DECISION:":
+            "required_actions_before_final_decision",
+        "HUMAN REVIEW REQUIRED:": "human_review_required",
+    }
+
+    if isinstance(synthesis_result, dict):
+        structured_key = structured_key_map.get(
+            section_heading.strip().upper()
+        )
+
+        if structured_key:
+            value = synthesis_result.get(
+                structured_key
+            )
+
+            if value is not None:
+                return value
+
+    text = get_synthesis_text(
+        synthesis_result
+    )
+
+    return extract_plain_text_section(
+        text,
+        section_heading,
+        next_headings,
+    )
+
+
 def display_multiline_text(text):
     """
-    Render newline-separated AI content cleanly in Streamlit.
+    Render newline-separated AI content cleanly
+    in Streamlit.
     """
+
+    if text is None:
+        st.write("No assessment available.")
+        return
+
+    if isinstance(text, (dict, list)):
+        text = result_text(text)
+
     if not text:
         st.write("No assessment available.")
         return
@@ -429,6 +669,9 @@ def add_pdf_text(
 ):
     if text is None:
         return
+
+    if isinstance(text, dict):
+        text = result_text(text)
 
     if isinstance(text, list):
         for index, item in enumerate(
@@ -632,6 +875,10 @@ if not cases:
 # ============================================================
 # CASE SELECTOR
 # ============================================================
+
+# IMPORTANT:
+# Case ID is part of the label so cases with identical
+# titles and amounts remain uniquely selectable.
 
 case_options = {}
 
@@ -852,7 +1099,11 @@ if review:
     ):
         evidence_gate = {}
 
-    # CURRENT DATABASE FIELD NAMES
+    # Actual production database fields:
+    # compliance_result
+    # financial_result
+    # risk_result
+    # synthesis
     compliance_result = extract_assessment(
         review,
         "compliance",
@@ -868,8 +1119,6 @@ if review:
         "risk",
     )
 
-    # IMPORTANT:
-    # The previous version did not actually assign this.
     synthesis_result = extract_synthesis(
         review
     )
@@ -1110,7 +1359,7 @@ else:
     # AI RECOMMENDATION
     # --------------------------------------------------------
 
-    recommendation = get_recommendation(
+    recommendation = extract_ai_recommendation(
         review,
         synthesis_result,
     )
@@ -1128,13 +1377,15 @@ else:
         "### Executive Summary"
     )
 
-    executive_summary = (
-        synthesis_result.get(
-            "executive_summary"
-        )
-        or synthesis_result.get(
-            "summary"
-        )
+    executive_summary = get_synthesis_section(
+        synthesis_result,
+        "EXECUTIVE SUMMARY:",
+        [
+            "COMPLIANCE ASSESSMENT:",
+            "FINANCIAL ASSESSMENT:",
+            "RISK ASSESSMENT:",
+            "KEY FINDINGS:",
+        ],
     )
 
     if executive_summary:
@@ -1194,49 +1445,69 @@ else:
     # SYNTHESIS SECTIONS
     # --------------------------------------------------------
 
-    synthesis_sections = [
+    synthesis_section_definitions = [
         (
-            "key_findings",
+            "KEY FINDINGS:",
             "Key Findings",
+            [
+                "MISSING OR UNCLEAR INFORMATION:",
+                "CRITICAL POLICY / CONTROL ISSUES:",
+                "AI RECOMMENDATION:",
+            ],
         ),
         (
-            "missing_or_unclear_information",
+            "MISSING OR UNCLEAR INFORMATION:",
             "Missing or Unclear Information",
+            [
+                "CRITICAL POLICY / CONTROL ISSUES:",
+                "AI RECOMMENDATION:",
+                "RECOMMENDATION REASON:",
+            ],
         ),
         (
-            "critical_policy_control_issues",
+            "CRITICAL POLICY / CONTROL ISSUES:",
             "Critical Policy / Control Issues",
+            [
+                "AI RECOMMENDATION:",
+                "RECOMMENDATION REASON:",
+                "REQUIRED ACTIONS BEFORE FINAL DECISION:",
+            ],
         ),
         (
-            "critical_policy_issues",
-            "Critical Policy / Control Issues",
+            "RECOMMENDATION REASON:",
+            "Recommendation Reason",
+            [
+                "REQUIRED ACTIONS BEFORE FINAL DECISION:",
+                "HUMAN REVIEW REQUIRED:",
+            ],
         ),
         (
-            "required_actions_before_final_decision",
+            "REQUIRED ACTIONS BEFORE FINAL DECISION:",
             "Required Actions Before Final Decision",
-        ),
-        (
-            "required_actions",
-            "Required Actions",
+            [
+                "HUMAN REVIEW REQUIRED:",
+            ],
         ),
     ]
 
     rendered_titles = set()
 
-    for section_key, section_title in (
-        synthesis_sections
-    ):
+    for (
+        section_heading,
+        section_title,
+        next_headings,
+    ) in synthesis_section_definitions:
 
         if section_title in rendered_titles:
             continue
 
-        section_value = (
-            synthesis_result.get(
-                section_key
-            )
+        section_value = get_synthesis_section(
+            synthesis_result,
+            section_heading,
+            next_headings,
         )
 
-        if section_value is None:
+        if not section_value:
             continue
 
         rendered_titles.add(
@@ -1247,44 +1518,55 @@ else:
             f"### {section_title}"
         )
 
-        if isinstance(
-            section_value,
-            list,
-        ):
-
-            for index, item in enumerate(
-                section_value,
-                start=1,
-            ):
-                st.write(
-                    f"{index}. "
-                    f"{safe_text(item)}"
-                )
-
-        else:
-            display_multiline_text(
-                section_value
-            )
+        display_multiline_text(
+            section_value
+        )
 
     # --------------------------------------------------------
     # HUMAN REVIEW REQUIRED
     # --------------------------------------------------------
 
-    human_review_required = (
-        synthesis_result.get(
-            "human_review_required"
-        )
-    )
+    human_review_required = None
 
-    if human_review_required is None:
-
+    if isinstance(
+        synthesis_result,
+        dict,
+    ):
         human_review_required = (
-            review.get(
+            synthesis_result.get(
                 "human_review_required"
             )
         )
 
+        if human_review_required is None:
+            human_review_required = (
+                synthesis_result.get("text")
+                and extract_plain_text_section(
+                    synthesis_result.get("text"),
+                    "HUMAN REVIEW REQUIRED:",
+                    [],
+                )
+            )
+
+    if human_review_required is None:
+        human_review_required = review.get(
+            "human_review_required"
+        )
+
     if human_review_required is not None:
+
+        if isinstance(
+            human_review_required,
+            str,
+        ):
+            normalized_review_value = (
+                human_review_required.strip().upper()
+            )
+
+            human_review_required = (
+                normalized_review_value
+                in ["YES", "TRUE", "1"]
+            )
 
         st.markdown(
             "**Human Review Required:** "
@@ -1953,7 +2235,7 @@ def generate_pdf():
         # AI RECOMMENDATION
         # ----------------------------------------------------
 
-        recommendation = get_recommendation(
+        recommendation = extract_ai_recommendation(
             review,
             synthesis_result,
         )
@@ -1979,13 +2261,15 @@ def generate_pdf():
             )
         )
 
-        executive_summary = (
-            synthesis_result.get(
-                "executive_summary"
-            )
-            or synthesis_result.get(
-                "summary"
-            )
+        executive_summary = get_synthesis_section(
+            synthesis_result,
+            "EXECUTIVE SUMMARY:",
+            [
+                "COMPLIANCE ASSESSMENT:",
+                "FINANCIAL ASSESSMENT:",
+                "RISK ASSESSMENT:",
+                "KEY FINDINGS:",
+            ],
         )
 
         if executive_summary:
@@ -2066,56 +2350,72 @@ def generate_pdf():
         )
 
         # ----------------------------------------------------
-        # SELECTED SYNTHESIS SECTIONS
+        # SYNTHESIS SECTIONS
         # ----------------------------------------------------
 
-        synthesis_sections = [
+        synthesis_section_definitions = [
             (
-                "key_findings",
+                "KEY FINDINGS:",
                 "Key Findings",
+                [
+                    "MISSING OR UNCLEAR INFORMATION:",
+                    "CRITICAL POLICY / CONTROL ISSUES:",
+                    "AI RECOMMENDATION:",
+                ],
             ),
             (
-                "missing_or_unclear_information",
+                "MISSING OR UNCLEAR INFORMATION:",
                 "Missing or Unclear Information",
+                [
+                    "CRITICAL POLICY / CONTROL ISSUES:",
+                    "AI RECOMMENDATION:",
+                    "RECOMMENDATION REASON:",
+                ],
             ),
             (
-                "critical_policy_control_issues",
+                "CRITICAL POLICY / CONTROL ISSUES:",
                 "Critical Policy / Control Issues",
+                [
+                    "AI RECOMMENDATION:",
+                    "RECOMMENDATION REASON:",
+                    "REQUIRED ACTIONS BEFORE FINAL DECISION:",
+                ],
             ),
             (
-                "critical_policy_issues",
-                "Critical Policy / Control Issues",
+                "RECOMMENDATION REASON:",
+                "Recommendation Reason",
+                [
+                    "REQUIRED ACTIONS BEFORE FINAL DECISION:",
+                    "HUMAN REVIEW REQUIRED:",
+                ],
             ),
             (
-                "required_actions_before_final_decision",
+                "REQUIRED ACTIONS BEFORE FINAL DECISION:",
                 "Required Actions Before Final Decision",
-            ),
-            (
-                "required_actions",
-                "Required Actions",
+                [
+                    "HUMAN REVIEW REQUIRED:",
+                ],
             ),
         ]
 
         rendered_titles = set()
 
         for (
-            section_key,
+            section_heading,
             section_title,
-        ) in synthesis_sections:
+            next_headings,
+        ) in synthesis_section_definitions:
 
-            if (
-                section_title
-                in rendered_titles
-            ):
+            if section_title in rendered_titles:
                 continue
 
-            section_value = (
-                synthesis_result.get(
-                    section_key
-                )
+            section_value = get_synthesis_section(
+                synthesis_result,
+                section_heading,
+                next_headings,
             )
 
-            if section_value is None:
+            if not section_value:
                 continue
 
             rendered_titles.add(
@@ -2124,60 +2424,69 @@ def generate_pdf():
 
             story.append(
                 Paragraph(
-                    escape(
-                        section_title
-                    ),
+                    escape(section_title),
                     subsection_style,
                 )
             )
 
-            if isinstance(
+            add_pdf_text(
+                story,
                 section_value,
-                list,
-            ):
-
-                for index, item in enumerate(
-                    section_value,
-                    start=1,
-                ):
-
-                    story.append(
-                        Paragraph(
-                            (
-                                f"{index}. "
-                                f"{pdf_escape(item)}"
-                            ),
-                            body_style,
-                        )
-                    )
-
-            else:
-
-                add_pdf_text(
-                    story,
-                    section_value,
-                    body_style,
-                )
+                body_style,
+            )
 
         # ----------------------------------------------------
         # HUMAN REVIEW REQUIRED
         # ----------------------------------------------------
 
-        human_review_required = (
-            synthesis_result.get(
-                "human_review_required"
-            )
-        )
+        human_review_required = None
 
-        if human_review_required is None:
-
+        if isinstance(
+            synthesis_result,
+            dict,
+        ):
             human_review_required = (
-                review.get(
+                synthesis_result.get(
                     "human_review_required"
                 )
             )
 
+            if human_review_required is None:
+
+                plain_text_value = (
+                    synthesis_result.get("text")
+                )
+
+                if plain_text_value:
+                    human_review_required = (
+                        extract_plain_text_section(
+                            plain_text_value,
+                            "HUMAN REVIEW REQUIRED:",
+                            [],
+                        )
+                    )
+
+        if human_review_required is None:
+            human_review_required = review.get(
+                "human_review_required"
+            )
+
         if human_review_required is not None:
+
+            if isinstance(
+                human_review_required,
+                str,
+            ):
+                normalized_review_value = (
+                    human_review_required
+                    .strip()
+                    .upper()
+                )
+
+                human_review_required = (
+                    normalized_review_value
+                    in ["YES", "TRUE", "1"]
+                )
 
             story.append(
                 Paragraph(
