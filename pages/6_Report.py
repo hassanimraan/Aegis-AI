@@ -679,3 +679,27 @@ st.download_button(
     type="primary",
     use_container_width=True
 )
+
+# ---------------------------------------------------------
+# PAGE NAVIGATION
+# ---------------------------------------------------------
+
+st.divider()
+
+nav_left, nav_right = st.columns([1, 1])
+
+with nav_left:
+    if st.button(
+        "← Case History",
+        use_container_width=True,
+        key="report_previous"
+    ):
+        st.switch_page("pages/5_Case_History.py")
+
+with nav_right:
+    if st.button(
+        "Back to Dashboard",
+        use_container_width=True,
+        key="report_dashboard"
+    ):
+        st.switch_page("pages/1_Dashboard.py")
