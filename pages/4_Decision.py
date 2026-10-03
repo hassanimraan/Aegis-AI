@@ -539,6 +539,29 @@ Do not provide a final human decision.
 
 st.divider()
 
+# ---------------------------------------------------------
+# PAGE NAVIGATION
+# ---------------------------------------------------------
+
+st.divider()
+
+nav_left, nav_right = st.columns([1, 1])
+
+with nav_left:
+    if st.button(
+        "← Case Review",
+        use_container_width=True,
+        key="Review_previous"
+    ):
+        st.switch_page("pages/3_Case_Review.py")
+
+with nav_right:
+    if st.button(
+        "Next: Case History →",
+        use_container_width=True,
+        key="decision_next"
+    ):
+        st.switch_page("pages/5_Case_History.py")
 
 # ---------------------------------------------------------
 # Human Final Decision
@@ -851,26 +874,3 @@ else:
             st.error(
                 f"Unable to save the human decision: {e}"
             )
-# ---------------------------------------------------------
-# PAGE NAVIGATION
-# ---------------------------------------------------------
-
-st.divider()
-
-nav_left, nav_right = st.columns([1, 1])
-
-with nav_left:
-    if st.button(
-        "← Case Review",
-        use_container_width=True,
-        key="Review_previous"
-    ):
-        st.switch_page("pages/3_Case_Review.py")
-
-with nav_right:
-    if st.button(
-        "Next: Case History →",
-        use_container_width=True,
-        key="decision_next"
-    ):
-        st.switch_page("pages/5_Case_History.py")
