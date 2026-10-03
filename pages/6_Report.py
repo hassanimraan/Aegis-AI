@@ -1,4 +1,5 @@
 import html
+import json
 from io import BytesIO
 
 import streamlit as st
@@ -10,403 +11,395 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import (
-Paragraph,
-SimpleDocTemplate,
-Spacer,
-Table,
-TableStyle,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
 )
+
 
 st.set_page_config(
-page_title="Report - AegisAI",
-page_icon="📄",
-layout="wide",
+    page_title="Report - AegisAI",
+    page_icon="📄",
+    layout="wide",
 )
 
+
 # =========================================================
-
 # AUTHENTICATION
-
 # =========================================================
 
 if (
-"user" not in st.session_state
-or st.session_state["user"] is None
+    "user" not in st.session_state
+    or st.session_state["user"] is None
 ):
-st.warning(
-"Please log in from the main AegisAI page."
-)
-st.stop()
+    st.warning(
+        "Please log in from the main AegisAI page."
+    )
+    st.stop()
+
+
+user = st.session_state["user"]
+
 
 # =========================================================
-
 # SUPABASE
-
 # =========================================================
 
 try:
-supabase = get_supabase()
+    supabase = get_supabase()
 
 except Exception as e:
-st.error(
-f"Unable to connect to Supabase: {e}"
-)
-st.stop()
+    st.error(
+        f"Unable to connect to Supabase: {e}"
+    )
+    st.stop()
+
 
 # =========================================================
-
 # PAGE HEADER
-
 # =========================================================
 
 st.title("📄 Approval Report")
 
 st.write(
-"View and download the complete AI-assisted approval "
-"and compliance report."
+    "View and download the complete AI-assisted approval "
+    "and compliance report."
 )
 
 st.divider()
 
+
 # =========================================================
-
 # HELPERS
-
 # =========================================================
 
 def format_amount(value):
-try:
-return f"PKR {float(value):,.0f}"
-except (TypeError, ValueError):
-return "PKR N/A"
+    try:
+        return f"PKR {float(value):,.0f}"
+    except (TypeError, ValueError):
+        return "PKR N/A"
+
 
 def safe_text(value, default="N/A"):
-if value is None or value == "":
-return default
+    if value is None or value == "":
+        return default
 
-
-return str(value)
+    return str(value)
 
 
 def extract_ai_text(value):
-"""
-AI agent results may be stored as either:
-- a router result dictionary containing 'text'
-- plain text
-"""
+    """
+    AI agent results may be stored as either:
+    - a router result dictionary containing 'text'
+    - plain text
+    """
 
-
-if isinstance(value, dict):
-    return str(
-        value.get(
-            "text",
-            ""
+    if isinstance(value, dict):
+        return str(
+            value.get(
+                "text",
+                "",
+            )
         )
-    )
 
-return str(
-    value
-    if value is not None
-    else ""
-)
+    return str(
+        value
+        if value is not None
+        else ""
+    )
 
 
 def pdf_text(value):
-"""
-Safely convert arbitrary text to ReportLab-compatible
-escaped HTML/XML text.
-"""
+    """
+    Safely convert arbitrary text to ReportLab-compatible
+    escaped HTML/XML text.
+    """
 
+    if value is None:
+        return ""
 
-if value is None:
-    return ""
-
-return (
-    html.escape(
-        str(value)
+    return (
+        html.escape(
+            str(value)
+        )
+        .replace(
+            "\n",
+            "<br/>",
+        )
     )
-    .replace(
-        "\n",
-        "<br/>"
-    )
-)
 
 
 # =========================================================
-
 # LOAD CASES
-
 # =========================================================
 
 try:
-response = (
-supabase
-.table("cases")
-.select("*")
-.eq(
-"user_id",
-st.session_state["user"].id
-)
-.order(
-"created_at",
-desc=True
-)
-.execute()
-)
+    response = (
+        supabase
+        .table("cases")
+        .select("*")
+        .eq(
+            "user_id",
+            user.id,
+        )
+        .order(
+            "created_at",
+            desc=True,
+        )
+        .execute()
+    )
 
-
-cases = response.data or []
-
+    cases = response.data or []
 
 except Exception as e:
-st.error(
-f"Unable to load cases: {e}"
-)
-st.stop()
+    st.error(
+        f"Unable to load cases: {e}"
+    )
+    st.stop()
+
 
 if not cases:
-st.info(
-"No approval cases are available."
-)
-st.stop()
+    st.info(
+        "No approval cases are available."
+    )
+    st.stop()
+
 
 # =========================================================
-
 # SELECT CASE
-
 # =========================================================
 
 case_options = {}
 
 for case_item in cases:
-
-
-title = case_item.get(
-    "title",
-    "Untitled"
-)
-
-amount_display = format_amount(
-    case_item.get(
-        "amount",
-        0
+    title = case_item.get(
+        "title",
+        "Untitled",
     )
-)
 
-label = (
-    f"{title} — "
-    f"{amount_display}"
-)
+    amount_display = format_amount(
+        case_item.get(
+            "amount",
+            0,
+        )
+    )
 
-case_options[label] = case_item
+    label = (
+        f"{title} — "
+        f"{amount_display} — "
+        f"Case #{case_item.get('id')}"
+    )
+
+    case_options[label] = case_item
 
 
 selected_label = st.selectbox(
-"Select Case",
-list(case_options.keys())
+    "Select Case",
+    list(case_options.keys()),
 )
 
 case = case_options[selected_label]
 
 case_id = case["id"]
 
+
 # =========================================================
-
 # LOAD AI REVIEW
-
 # =========================================================
 
 try:
-review_response = (
-supabase
-.table("ai_reviews")
-.select("*")
-.eq(
-"case_id",
-case_id
-)
-.order(
-"created_at",
-desc=True
-)
-.limit(1)
-.execute()
-)
+    review_response = (
+        supabase
+        .table("ai_reviews")
+        .select("*")
+        .eq(
+            "case_id",
+            case_id,
+        )
+        .order(
+            "created_at",
+            desc=True,
+        )
+        .limit(1)
+        .execute()
+    )
 
-
-reviews = review_response.data or []
-
+    reviews = review_response.data or []
 
 except Exception:
-reviews = []
+    reviews = []
+
 
 review = (
-reviews[0]
-if reviews
-else {}
+    reviews[0]
+    if reviews
+    else {}
 )
 
+
 # =========================================================
-
 # LOAD WORKFLOW CHECKPOINTS
-
 # =========================================================
 
 STEP_DEFINITIONS = [
-("RAG", "Policy Retrieval"),
-("COMPLIANCE", "Compliance Agent"),
-("FINANCIAL", "Financial Agent"),
-("RISK", "Risk Agent"),
-("SYNTHESIS", "Decision Synthesizer"),
-("EVIDENCE", "Evidence Gate"),
+    ("RAG", "Policy Retrieval"),
+    ("COMPLIANCE", "Compliance Agent"),
+    ("FINANCIAL", "Financial Agent"),
+    ("RISK", "Risk Agent"),
+    ("SYNTHESIS", "Decision Synthesizer"),
+    ("EVIDENCE", "Evidence Gate"),
 ]
 
+
 try:
-steps_response = (
-supabase
-.table("ai_review_steps")
-.select("*")
-.eq(
-"case_id",
-case_id
-)
-.order(
-"step_order",
-desc=False
-)
-.execute()
-)
+    steps_response = (
+        supabase
+        .table("ai_review_steps")
+        .select("*")
+        .eq(
+            "case_id",
+            case_id,
+        )
+        .order(
+            "step_order",
+            desc=False,
+        )
+        .execute()
+    )
 
-
-review_steps = steps_response.data or []
-
+    review_steps = steps_response.data or []
 
 except Exception:
-review_steps = []
+    review_steps = []
+
 
 step_map = {
-step.get("step_name"): step
-for step in review_steps
+    step.get("step_name"): step
+    for step in review_steps
 }
 
+
 # =========================================================
-
 # LOAD HUMAN DECISION
-
 # =========================================================
 
 try:
-decision_response = (
-supabase
-.table("decisions")
-.select("*")
-.eq(
-"case_id",
-case_id
-)
-.order(
-"created_at",
-desc=True
-)
-.limit(1)
-.execute()
-)
+    decision_response = (
+        supabase
+        .table("decisions")
+        .select("*")
+        .eq(
+            "case_id",
+            case_id,
+        )
+        .order(
+            "created_at",
+            desc=True,
+        )
+        .limit(1)
+        .execute()
+    )
 
-
-decisions = decision_response.data or []
-
+    decisions = decision_response.data or []
 
 except Exception:
-decisions = []
+    decisions = []
+
 
 decision = (
-decisions[0]
-if decisions
-else {}
+    decisions[0]
+    if decisions
+    else {}
 )
 
+
 # =========================================================
-
 # LOAD AUDIT LOGS
-
 # =========================================================
 
 try:
-audit_response = (
-supabase
-.table("audit_logs")
-.select("*")
-.eq(
-"case_id",
-case_id
-)
-.order(
-"created_at",
-desc=True
-)
-.execute()
-)
+    audit_response = (
+        supabase
+        .table("audit_logs")
+        .select("*")
+        .eq(
+            "case_id",
+            case_id,
+        )
+        .order(
+            "created_at",
+            desc=True,
+        )
+        .execute()
+    )
 
-
-audit_logs = audit_response.data or []
-
+    audit_logs = audit_response.data or []
 
 except Exception:
-audit_logs = []
+    audit_logs = []
+
 
 # =========================================================
-
 # EVIDENCE GATE
-
 # =========================================================
 
 evidence_gate = {}
 
 if review:
-
-
-evidence_gate = (
-    review.get(
-        "evidence_gate",
-        {}
+    evidence_gate = (
+        review.get(
+            "evidence_gate",
+            {},
+        )
+        or {}
     )
-    or {}
-)
 
-if isinstance(
-    evidence_gate,
-    str
-):
-    evidence_gate = {}
+    if isinstance(
+        evidence_gate,
+        str,
+    ):
+        try:
+            evidence_gate = json.loads(
+                evidence_gate
+            )
+        except Exception:
+            evidence_gate = {}
+
+    if not isinstance(
+        evidence_gate,
+        dict,
+    ):
+        evidence_gate = {}
 
 
 gate_complete = bool(
-evidence_gate.get(
-"complete",
-False
-)
+    evidence_gate.get(
+        "complete",
+        False,
+    )
 )
 
 missing_requirements = (
-evidence_gate.get(
-"missing",
-[]
-)
-or []
+    evidence_gate.get(
+        "missing",
+        [],
+    )
+    or []
 )
 
 requirements = (
-review.get(
-"requirements",
-[]
+    review.get(
+        "requirements",
+        [],
+    )
+    or []
 )
-or []
-)
+
 
 # =========================================================
-
 # CASE INFORMATION
-
 # =========================================================
 
 st.subheader("📌 Case Information")
@@ -414,873 +407,340 @@ st.subheader("📌 Case Information")
 col1, col2, col3 = st.columns(3)
 
 with col1:
+    st.write(
+        f"**Case:** "
+        f"{safe_text(case.get('title'))}"
+    )
 
+    st.write(
+        f"**Case ID:** "
+        f"{case_id}"
+    )
 
-st.write(
-    f"**Case:** "
-    f"{safe_text(case.get('title'))}"
-)
-
-st.write(
-    f"**Department:** "
-    f"{safe_text(case.get('department'))}"
-)
+    st.write(
+        f"**Department:** "
+        f"{safe_text(case.get('department'))}"
+    )
 
 
 with col2:
+    st.write(
+        f"**Amount:** "
+        f"{format_amount(case.get('amount', 0))}"
+    )
 
-
-st.write(
-    f"**Amount:** "
-    f"{format_amount(case.get('amount', 0))}"
-)
-
-st.write(
-    f"**Status:** "
-    f"{safe_text(case.get('status'))}"
-)
+    st.write(
+        f"**Status:** "
+        f"{safe_text(case.get('status'))}"
+    )
 
 
 with col3:
-
-
-st.write(
-    f"**Created:** "
-    f"{safe_text(case.get('created_at'))}"
-)
+    st.write(
+        f"**Created:** "
+        f"{safe_text(case.get('created_at'))}"
+    )
 
 
 st.divider()
 
+
 # =========================================================
-
 # AI WORKFLOW STATUS
-
 # =========================================================
 
 st.subheader("⚙️ AI Review Workflow")
 
 if review_steps:
+    workflow_cols = st.columns(3)
 
-
-workflow_cols = st.columns(3)
-
-for index, (step_name, label) in enumerate(
-    STEP_DEFINITIONS
-):
-
-    step = step_map.get(
-        step_name,
-        {}
-    )
-
-    status = (
-        step.get(
-            "status",
-            "PENDING"
+    for index, (step_name, label) in enumerate(
+        STEP_DEFINITIONS
+    ):
+        step = step_map.get(
+            step_name,
+            {},
         )
-        or "PENDING"
-    ).upper()
 
-    provider = step.get(
-        "provider"
-    )
-
-    model = step.get(
-        "model"
-    )
-
-    with workflow_cols[index % 3]:
-
-        if status == "COMPLETED":
-
-            st.success(
-                f"✅ {label}\n\n"
-                f"COMPLETED"
+        status = (
+            step.get(
+                "status",
+                "PENDING",
             )
+            or "PENDING"
+        ).upper()
 
-        elif status == "RUNNING":
+        provider = step.get(
+            "provider"
+        )
 
-            st.info(
-                f"🔄 {label}\n\n"
-                f"RUNNING"
-            )
+        model = step.get(
+            "model"
+        )
 
-        elif status == "FAILED":
+        with workflow_cols[index % 3]:
+            if status == "COMPLETED":
+                st.success(
+                    f"✅ {label}\n\n"
+                    "COMPLETED"
+                )
 
-            st.error(
-                f"❌ {label}\n\n"
-                f"FAILED"
-            )
+            elif status == "RUNNING":
+                st.info(
+                    f"🔄 {label}\n\n"
+                    "RUNNING"
+                )
 
-        else:
+            elif status == "FAILED":
+                st.error(
+                    f"❌ {label}\n\n"
+                    "FAILED"
+                )
 
-            st.warning(
-                f"⏳ {label}\n\n"
-                f"{status}"
-            )
+            else:
+                st.warning(
+                    f"⏳ {label}\n\n"
+                    f"{status}"
+                )
 
-        if provider or model:
+            if provider or model:
+                provider_text = (
+                    provider
+                    if provider
+                    else "N/A"
+                )
 
-            provider_text = (
-                provider
-                if provider
-                else "N/A"
-            )
+                model_text = (
+                    model
+                    if model
+                    else "N/A"
+                )
 
-            model_text = (
-                model
-                if model
-                else "N/A"
-            )
-
-            st.caption(
-                f"{provider_text} · "
-                f"{model_text}"
-            )
-
+                st.caption(
+                    f"{provider_text} · "
+                    f"{model_text}"
+                )
 
 else:
-
-
-st.info(
-    "No AI review workflow has been completed "
-    "for this case."
-)
+    st.info(
+        "No AI review workflow has been completed "
+        "for this case."
+    )
 
 
 st.divider()
 
+
 # =========================================================
-
 # EVIDENCE GATE
-
 # =========================================================
 
 st.subheader("🛡️ Evidence Gate")
 
 if not review:
-
-
-st.warning(
-    "Evidence requirements cannot be evaluated "
-    "because no AI review is available."
-)
-
-
-else:
-
-
-if gate_complete:
-
-    st.success(
-        "✅ Evidence Gate PASSED — all mandatory "
-        "policy-driven evidence requirements are satisfied."
+    st.warning(
+        "Evidence requirements cannot be evaluated "
+        "because no AI review is available."
     )
 
 else:
-
-    st.error(
-        "🔒 Evidence Gate NOT PASSED — mandatory "
-        "policy-driven evidence is incomplete."
-    )
-
-    if missing_requirements:
-
-        st.write(
-            "**Missing / Incomplete Requirements:**"
+    if gate_complete:
+        st.success(
+            "✅ Evidence Gate PASSED — all mandatory "
+            "policy-driven evidence requirements are satisfied."
         )
-
-        for item in missing_requirements:
-
-            if isinstance(item, dict):
-
-                name = (
-                    item.get("name")
-                    or "Mandatory evidence requirement"
-                )
-
-                reason = (
-                    item.get("reason")
-                    or ""
-                )
-
-                evidence_rule = (
-                    item.get("evidence_rule")
-                    or ""
-                )
-
-                minimum_count = item.get(
-                    "minimum_count"
-                )
-
-                line = f"**{name}**"
-
-                if minimum_count is not None:
-
-                    line += (
-                        f" — Minimum required: "
-                        f"{minimum_count}"
-                    )
-
-                st.write(line)
-
-                if reason:
-
-                    st.caption(
-                        f"Reason: {reason}"
-                    )
-
-                if evidence_rule:
-
-                    st.caption(
-                        f"Policy / Evidence Rule: "
-                        f"{evidence_rule}"
-                    )
-
-            else:
-
-                st.write(
-                    f"- {item}"
-                )
 
     else:
-
-        st.info(
-            "The evidence gate has not been satisfied."
+        st.error(
+            "🔒 Evidence Gate NOT PASSED — mandatory "
+            "policy-driven evidence is incomplete."
         )
+
+        if missing_requirements:
+            st.write(
+                "**Missing / Incomplete Requirements:**"
+            )
+
+            for item in missing_requirements:
+                if isinstance(
+                    item,
+                    dict,
+                ):
+                    name = (
+                        item.get("name")
+                        or "Mandatory evidence requirement"
+                    )
+
+                    reason = (
+                        item.get("reason")
+                        or ""
+                    )
+
+                    evidence_rule = (
+                        item.get("evidence_rule")
+                        or ""
+                    )
+
+                    minimum_count = item.get(
+                        "minimum_count"
+                    )
+
+                    line = f"**{name}**"
+
+                    if minimum_count is not None:
+                        line += (
+                            f" — Minimum required: "
+                            f"{minimum_count}"
+                        )
+
+                    st.write(line)
+
+                    if reason:
+                        st.caption(
+                            f"Reason: {reason}"
+                        )
+
+                    if evidence_rule:
+                        st.caption(
+                            f"Policy / Evidence Rule: "
+                            f"{evidence_rule}"
+                        )
+
+                else:
+                    st.write(
+                        f"- {item}"
+                    )
+
+        else:
+            st.info(
+                "The evidence gate has not been satisfied."
+            )
 
 
 st.divider()
 
+
 # =========================================================
-
 # AI ASSESSMENT
-
 # =========================================================
 
 st.subheader("🤖 AI Assessment")
 
 if review:
-
-
-recommendation = safe_text(
-    review.get(
-        "recommendation"
-    )
-)
-
-st.info(
-    f"**AI Recommendation:** "
-    f"{recommendation}"
-)
-
-synthesis = extract_ai_text(
-    review.get(
-        "synthesis"
-    )
-)
-
-if synthesis:
-
-    st.write(
-        "### Decision Synthesis"
+    recommendation = safe_text(
+        review.get(
+            "recommendation"
+        )
     )
 
-    st.write(
-        synthesis
+    st.info(
+        f"**AI Recommendation:** "
+        f"{recommendation}"
     )
 
+    synthesis = extract_ai_text(
+        review.get(
+            "synthesis"
+        )
+    )
+
+    if synthesis:
+        st.write(
+            "### Decision Synthesis"
+        )
+
+        st.write(
+            synthesis
+        )
 
 else:
-
-
-st.warning(
-    "No AI review is available for this case."
-)
+    st.warning(
+        "No AI review is available for this case."
+    )
 
 
 # =========================================================
-
 # AGENT ASSESSMENTS
-
 # =========================================================
 
 if review:
-
-
-with st.expander(
-    "Compliance Assessment"
-):
-
-    compliance_text = extract_ai_text(
-        review.get(
-            "compliance"
-        )
-    )
-
-    if compliance_text:
-
-        st.write(
-            compliance_text
-        )
-
-    else:
-
-        st.info(
-            "No Compliance Agent result available."
-        )
-
-
-with st.expander(
-    "Financial Assessment"
-):
-
-    financial_text = extract_ai_text(
-        review.get(
-            "financial"
-        )
-    )
-
-    if financial_text:
-
-        st.write(
-            financial_text
-        )
-
-    else:
-
-        st.info(
-            "No Financial Agent result available."
-        )
-
-
-with st.expander(
-    "Risk Assessment"
-):
-
-    risk_text = extract_ai_text(
-        review.get(
-            "risk"
-        )
-    )
-
-    if risk_text:
-
-        st.write(
-            risk_text
-        )
-
-    else:
-
-        st.info(
-            "No Risk Agent result available."
-        )
-
-
-st.divider()
-
-# =========================================================
-
-# POLICY REQUIREMENTS
-
-# =========================================================
-
-if requirements:
-
-
-st.subheader(
-    "📋 Policy-Driven Requirements"
-)
-
-for requirement in requirements:
-
-    if isinstance(
-        requirement,
-        dict
+    with st.expander(
+        "Compliance Assessment"
     ):
-
-        name = (
-            requirement.get(
-                "name"
-            )
-            or "Requirement"
-        )
-
-        mandatory = requirement.get(
-            "mandatory",
-            False
-        )
-
-        status = (
-            requirement.get(
-                "status"
-            )
-            or "UNKNOWN"
-        )
-
-        reason = (
-            requirement.get(
-                "reason"
-            )
-            or ""
-        )
-
-        evidence_rule = (
-            requirement.get(
-                "evidence_rule"
-            )
-            or ""
-        )
-
-        minimum_count = requirement.get(
-            "minimum_count"
-        )
-
-        line = f"**{name}**"
-
-        if mandatory is True:
-
-            line += " — Mandatory"
-
-        if status:
-
-            line += (
-                f" — {status}"
-            )
-
-        if minimum_count is not None:
-
-            line += (
-                f" — Minimum: "
-                f"{minimum_count}"
-            )
-
-        st.markdown(
-            line
-        )
-
-        if reason:
-
-            st.caption(
-                f"Reason: {reason}"
-            )
-
-        if evidence_rule:
-
-            st.caption(
-                f"Policy / Evidence Rule: "
-                f"{evidence_rule}"
-            )
-
-    else:
-
-        st.write(
-            f"- {requirement}"
-        )
-
-
-st.divider()
-
-# =========================================================
-
-# HUMAN DECISION
-
-# =========================================================
-
-st.subheader("👤 Human Decision")
-
-if decision:
-
-
-decision_value = safe_text(
-    decision.get(
-        "decision"
-    )
-)
-
-col1, col2 = st.columns(2)
-
-with col1:
-
-    st.success(
-        f"**Final Decision:** "
-        f"{decision_value}"
-    )
-
-with col2:
-
-    st.write(
-        f"**Decision Date:** "
-        f"{safe_text(decision.get('created_at'))}"
-    )
-
-st.write(
-    f"**Reviewer Comments:** "
-    f"{decision.get('comments') or 'None'}"
-)
-
-
-else:
-
-
-st.warning(
-    "No human decision has been recorded."
-)
-
-if review and not gate_complete:
-
-    st.info(
-        "Human decision remains locked because "
-        "the Evidence Gate has not been satisfied."
-    )
-
-elif not review:
-
-    st.info(
-        "Complete the AI review before proceeding "
-        "to human decision."
-    )
-
-else:
-
-    st.info(
-        "Evidence requirements are satisfied, "
-        "but no human decision has been recorded yet."
-    )
-
-
-st.divider()
-
-# =========================================================
-
-# AUDIT TRAIL
-
-# =========================================================
-
-st.subheader("📝 Audit Trail")
-
-if audit_logs:
-
-
-for log in audit_logs:
-
-    st.write(
-        f"**{safe_text(log.get('created_at'))}** — "
-        f"{safe_text(log.get('action'))}"
-    )
-
-    if log.get("details"):
-
-        st.caption(
-            str(
-                log.get(
-                    "details"
-                )
+        compliance_text = extract_ai_text(
+            review.get(
+                "compliance"
             )
         )
 
-
-else:
-
-
-st.info(
-    "No audit records available."
-)
-
-
-st.divider()
-
-# =========================================================
-
-# PDF REPORT GENERATOR
-
-# =========================================================
-
-def generate_pdf():
-
-
-buffer = BytesIO()
-
-document = SimpleDocTemplate(
-    buffer,
-    pagesize=A4,
-    rightMargin=40,
-    leftMargin=40,
-    topMargin=40,
-    bottomMargin=40,
-)
-
-styles = getSampleStyleSheet()
-
-title_style = styles["Title"]
-
-title_style.alignment = TA_CENTER
-
-story = []
-
-
-# -----------------------------------------------------
-# TITLE
-# -----------------------------------------------------
-
-story.append(
-    Paragraph(
-        "AegisAI — Approval & Compliance Report",
-        title_style,
-    )
-)
-
-story.append(
-    Spacer(1, 20)
-)
-
-
-# -----------------------------------------------------
-# CASE INFORMATION
-# -----------------------------------------------------
-
-story.append(
-    Paragraph(
-        "<b>Case Information</b>",
-        styles["Heading2"],
-    )
-)
-
-case_data = [
-    [
-        "Case",
-        pdf_text(
-            case.get(
-                "title",
-                "N/A"
+        if compliance_text:
+            st.write(
+                compliance_text
             )
-        ),
-    ],
-    [
-        "Department",
-        pdf_text(
-            case.get(
-                "department",
-                "N/A"
-            )
-        ),
-    ],
-    [
-        "Amount",
-        pdf_text(
-            format_amount(
-                case.get(
-                    "amount",
-                    0
-                )
-            )
-        ),
-    ],
-    [
-        "Status",
-        pdf_text(
-            case.get(
-                "status",
-                "N/A"
-            )
-        ),
-    ],
-    [
-        "Created",
-        pdf_text(
-            case.get(
-                "created_at",
-                "N/A"
-            )
-        ),
-    ],
-]
-
-table = Table(
-    case_data,
-    colWidths=[
-        130,
-        350,
-    ],
-)
-
-table.setStyle(
-    TableStyle([
-        (
-            "GRID",
-            (0, 0),
-            (-1, -1),
-            0.5,
-            colors.grey,
-        ),
-        (
-            "VALIGN",
-            (0, 0),
-            (-1, -1),
-            "TOP",
-        ),
-        (
-            "BACKGROUND",
-            (0, 0),
-            (0, -1),
-            colors.lightgrey,
-        ),
-        (
-            "FONTNAME",
-            (0, 0),
-            (0, -1),
-            "Helvetica-Bold",
-        ),
-        (
-            "PADDING",
-            (0, 0),
-            (-1, -1),
-            6,
-        ),
-    ])
-)
-
-story.append(
-    table
-)
-
-story.append(
-    Spacer(1, 20)
-)
-
-
-# -----------------------------------------------------
-# EVIDENCE GATE
-# -----------------------------------------------------
-
-story.append(
-    Paragraph(
-        "<b>Evidence Gate</b>",
-        styles["Heading2"],
-    )
-)
-
-gate_status = (
-    "PASSED"
-    if gate_complete
-    else "NOT PASSED"
-)
-
-story.append(
-    Paragraph(
-        (
-            "<b>Status:</b> "
-            f"{pdf_text(gate_status)}"
-        ),
-        styles["BodyText"],
-    )
-)
-
-if missing_requirements:
-
-    story.append(
-        Spacer(1, 8)
-    )
-
-    story.append(
-        Paragraph(
-            "<b>Missing / Incomplete Requirements:</b>",
-            styles["BodyText"],
-        )
-    )
-
-    for item in missing_requirements:
-
-        if isinstance(
-            item,
-            dict
-        ):
-
-            name = (
-                item.get(
-                    "name"
-                )
-                or "Mandatory evidence requirement"
-            )
-
-            reason = (
-                item.get(
-                    "reason"
-                )
-                or ""
-            )
-
-            evidence_rule = (
-                item.get(
-                    "evidence_rule"
-                )
-                or ""
-            )
-
-            minimum_count = item.get(
-                "minimum_count"
-            )
-
-            text = str(name)
-
-            if minimum_count is not None:
-
-                text += (
-                    f" — Minimum required: "
-                    f"{minimum_count}"
-                )
-
-            if reason:
-
-                text += (
-                    f" — Reason: "
-                    f"{reason}"
-                )
-
-            if evidence_rule:
-
-                text += (
-                    f" — Policy / Evidence Rule: "
-                    f"{evidence_rule}"
-                )
 
         else:
+            st.info(
+                "No Compliance Agent result available."
+            )
 
-            text = str(item)
 
-        story.append(
-            Paragraph(
-                f"• {pdf_text(text)}",
-                styles["BodyText"],
+    with st.expander(
+        "Financial Assessment"
+    ):
+        financial_text = extract_ai_text(
+            review.get(
+                "financial"
             )
         )
 
+        if financial_text:
+            st.write(
+                financial_text
+            )
 
-# -----------------------------------------------------
-# POLICY-DRIVEN REQUIREMENTS
-# -----------------------------------------------------
+        else:
+            st.info(
+                "No Financial Agent result available."
+            )
+
+
+    with st.expander(
+        "Risk Assessment"
+    ):
+        risk_text = extract_ai_text(
+            review.get(
+                "risk"
+            )
+        )
+
+        if risk_text:
+            st.write(
+                risk_text
+            )
+
+        else:
+            st.info(
+                "No Risk Agent result available."
+            )
+
+
+st.divider()
+
+
+# =========================================================
+# POLICY REQUIREMENTS
+# =========================================================
 
 if requirements:
-
-    story.append(
-        Spacer(1, 20)
-    )
-
-    story.append(
-        Paragraph(
-            "<b>Policy-Driven Requirements</b>",
-            styles["Heading2"],
-        )
+    st.subheader(
+        "📋 Policy-Driven Requirements"
     )
 
     for requirement in requirements:
-
         if isinstance(
             requirement,
-            dict
+            dict,
         ):
-
             name = (
                 requirement.get(
                     "name"
@@ -1290,7 +750,7 @@ if requirements:
 
             mandatory = requirement.get(
                 "mandatory",
-                False
+                False,
             )
 
             status = (
@@ -1318,383 +778,888 @@ if requirements:
                 "minimum_count"
             )
 
-            text = str(name)
+            line = f"**{name}**"
 
-            if mandatory:
-
-                text += " — Mandatory"
+            if mandatory is True:
+                line += " — Mandatory"
 
             if status:
-
-                text += (
+                line += (
                     f" — {status}"
                 )
 
             if minimum_count is not None:
-
-                text += (
+                line += (
                     f" — Minimum: "
                     f"{minimum_count}"
                 )
 
-            if reason:
+            st.markdown(
+                line
+            )
 
-                text += (
-                    f" — Reason: "
-                    f"{reason}"
+            if reason:
+                st.caption(
+                    f"Reason: {reason}"
                 )
 
             if evidence_rule:
-
-                text += (
-                    f" — Policy / Evidence Rule: "
+                st.caption(
+                    f"Policy / Evidence Rule: "
                     f"{evidence_rule}"
                 )
 
         else:
-
-            text = str(requirement)
-
-        story.append(
-            Paragraph(
-                f"• {pdf_text(text)}",
-                styles["BodyText"],
+            st.write(
+                f"- {requirement}"
             )
-        )
 
 
-# -----------------------------------------------------
-# AI ASSESSMENT
-# -----------------------------------------------------
-
-story.append(
-    Spacer(1, 20)
-)
-
-story.append(
-    Paragraph(
-        "<b>AI Assessment</b>",
-        styles["Heading2"],
-    )
-)
-
-recommendation = safe_text(
-    review.get(
-        "recommendation"
-    )
-)
-
-story.append(
-    Paragraph(
-        (
-            "<b>AI Recommendation:</b> "
-            f"{pdf_text(recommendation)}"
-        ),
-        styles["BodyText"],
-    )
-)
-
-story.append(
-    Spacer(1, 10)
-)
-
-synthesis = extract_ai_text(
-    review.get(
-        "synthesis"
-    )
-)
-
-if synthesis:
-
-    story.append(
-        Paragraph(
-            "<b>Decision Synthesis</b>",
-            styles["Heading3"],
-        )
-    )
-
-    story.append(
-        Paragraph(
-            pdf_text(
-                synthesis
-            ),
-            styles["BodyText"],
-        )
-    )
-
-else:
-
-    story.append(
-        Paragraph(
-            "No AI synthesis available.",
-            styles["BodyText"],
-        )
-    )
-
-
-# -----------------------------------------------------
-# HUMAN DECISION
-# -----------------------------------------------------
-
-story.append(
-    Spacer(1, 20)
-)
-
-story.append(
-    Paragraph(
-        "<b>Human Decision</b>",
-        styles["Heading2"],
-    )
-)
-
-if decision:
-
-    story.append(
-        Paragraph(
-            (
-                "<b>Final Decision:</b> "
-                f"{pdf_text(decision.get('decision', 'N/A'))}"
-            ),
-            styles["BodyText"],
-        )
-    )
-
-    story.append(
-        Paragraph(
-            (
-                "<b>Decision Date:</b> "
-                f"{pdf_text(decision.get('created_at', 'N/A'))}"
-            ),
-            styles["BodyText"],
-        )
-    )
-
-    story.append(
-        Paragraph(
-            (
-                "<b>Comments:</b> "
-                f"{pdf_text(decision.get('comments') or 'None')}"
-            ),
-            styles["BodyText"],
-        )
-    )
-
-else:
-
-    story.append(
-        Paragraph(
-            "No human decision has been recorded.",
-            styles["BodyText"],
-        )
-    )
-
-
-# -----------------------------------------------------
-# WORKFLOW STATUS
-# -----------------------------------------------------
-
-story.append(
-    Spacer(1, 20)
-)
-
-story.append(
-    Paragraph(
-        "<b>AI Workflow Checkpoints</b>",
-        styles["Heading2"],
-    )
-)
-
-workflow_data = [
-    [
-        "Step",
-        "Status",
-        "Provider",
-        "Model",
-    ]
-]
-
-for step_name, label in STEP_DEFINITIONS:
-
-    step = step_map.get(
-        step_name,
-        {}
-    )
-
-    workflow_data.append(
-        [
-            label,
-            safe_text(
-                step.get(
-                    "status",
-                    "PENDING"
-                )
-            ),
-            safe_text(
-                step.get(
-                    "provider"
-                )
-            ),
-            safe_text(
-                step.get(
-                    "model"
-                )
-            ),
-        ]
-    )
-
-workflow_table = Table(
-    workflow_data,
-    colWidths=[
-        150,
-        90,
-        90,
-        150,
-    ],
-    repeatRows=1,
-)
-
-workflow_table.setStyle(
-    TableStyle([
-        (
-            "GRID",
-            (0, 0),
-            (-1, -1),
-            0.5,
-            colors.grey,
-        ),
-        (
-            "BACKGROUND",
-            (0, 0),
-            (-1, 0),
-            colors.lightgrey,
-        ),
-        (
-            "FONTNAME",
-            (0, 0),
-            (-1, 0),
-            "Helvetica-Bold",
-        ),
-        (
-            "VALIGN",
-            (0, 0),
-            (-1, -1),
-            "TOP",
-        ),
-        (
-            "PADDING",
-            (0, 0),
-            (-1, -1),
-            5,
-        ),
-    ])
-)
-
-story.append(
-    workflow_table
-)
-
-
-# -----------------------------------------------------
-# AUDIT TRAIL
-# -----------------------------------------------------
-
-story.append(
-    Spacer(1, 20)
-)
-
-story.append(
-    Paragraph(
-        "<b>Audit Trail</b>",
-        styles["Heading2"],
-    )
-)
-
-if audit_logs:
-
-    for log in audit_logs:
-
-        text = (
-            f"{log.get('created_at', 'N/A')} — "
-            f"{log.get('action', 'N/A')} — "
-            f"{log.get('details', '')}"
-        )
-
-        story.append(
-            Paragraph(
-                pdf_text(text),
-                styles["BodyText"],
-            )
-        )
-
-        story.append(
-            Spacer(1, 5)
-        )
-
-else:
-
-    story.append(
-        Paragraph(
-            "No audit records available.",
-            styles["BodyText"],
-        )
-    )
-
-
-# -----------------------------------------------------
-# DISCLAIMER
-# -----------------------------------------------------
-
-story.append(
-    Spacer(1, 20)
-)
-
-story.append(
-    Paragraph(
-        (
-            "AegisAI — AI recommendations are advisory. "
-            "Human decisions are authoritative."
-        ),
-        styles["Italic"],
-    )
-)
-
-
-# -----------------------------------------------------
-# BUILD PDF
-# -----------------------------------------------------
-
-document.build(
-    story
-)
-
-buffer.seek(0)
-
-return buffer
+    st.divider()
 
 
 # =========================================================
+# HUMAN DECISION
+# =========================================================
 
+st.subheader("👤 Human Decision")
+
+if decision:
+    decision_value = safe_text(
+        decision.get(
+            "decision"
+        )
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.success(
+            f"**Final Decision:** "
+            f"{decision_value}"
+        )
+
+    with col2:
+        st.write(
+            f"**Decision Date:** "
+            f"{safe_text(decision.get('created_at'))}"
+        )
+
+    st.write(
+        f"**Reviewer Comments:** "
+        f"{decision.get('comments') or 'None'}"
+    )
+
+else:
+    st.warning(
+        "No human decision has been recorded."
+    )
+
+    if review and not gate_complete:
+        st.info(
+            "Human decision remains locked because "
+            "the Evidence Gate has not been satisfied."
+        )
+
+    elif not review:
+        st.info(
+            "Complete the AI review before proceeding "
+            "to human decision."
+        )
+
+    else:
+        st.info(
+            "Evidence requirements are satisfied, "
+            "but no human decision has been recorded yet."
+        )
+
+
+st.divider()
+
+
+# =========================================================
+# AUDIT TRAIL
+# =========================================================
+
+st.subheader("📝 Audit Trail")
+
+if audit_logs:
+    for log in audit_logs:
+        st.write(
+            f"**{safe_text(log.get('created_at'))}** — "
+            f"{safe_text(log.get('action'))}"
+        )
+
+        if log.get("details"):
+            st.caption(
+                str(
+                    log.get(
+                        "details"
+                    )
+                )
+            )
+
+else:
+    st.info(
+        "No audit records available."
+    )
+
+
+st.divider()
+
+
+# =========================================================
+# PDF REPORT GENERATOR
+# =========================================================
+
+def generate_pdf():
+    """
+    Generate a PDF using only the currently selected case
+    and its case-specific AI review, workflow, decision,
+    requirements, evidence gate, and audit records.
+    """
+
+    buffer = BytesIO()
+
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40,
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = styles["Title"]
+    title_style.alignment = TA_CENTER
+
+    story = []
+
+    # -----------------------------------------------------
+    # TITLE
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "AegisAI — Approval & Compliance Report",
+            title_style,
+        )
+    )
+
+    story.append(
+        Spacer(1, 20)
+    )
+
+
+    # -----------------------------------------------------
+    # CASE INFORMATION
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "<b>Case Information</b>",
+            styles["Heading2"],
+        )
+    )
+
+    case_data = [
+        [
+            "Case ID",
+            pdf_text(case_id),
+        ],
+        [
+            "Case",
+            pdf_text(
+                case.get(
+                    "title",
+                    "N/A",
+                )
+            ),
+        ],
+        [
+            "Department",
+            pdf_text(
+                case.get(
+                    "department",
+                    "N/A",
+                )
+            ),
+        ],
+        [
+            "Amount",
+            pdf_text(
+                format_amount(
+                    case.get(
+                        "amount",
+                        0,
+                    )
+                )
+            ),
+        ],
+        [
+            "Status",
+            pdf_text(
+                case.get(
+                    "status",
+                    "N/A",
+                )
+            ),
+        ],
+        [
+            "Created",
+            pdf_text(
+                case.get(
+                    "created_at",
+                    "N/A",
+                )
+            ),
+        ],
+    ]
+
+    table = Table(
+        case_data,
+        colWidths=[
+            130,
+            350,
+        ],
+    )
+
+    table.setStyle(
+        TableStyle([
+            (
+                "GRID",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.grey,
+            ),
+            (
+                "VALIGN",
+                (0, 0),
+                (-1, -1),
+                "TOP",
+            ),
+            (
+                "BACKGROUND",
+                (0, 0),
+                (0, -1),
+                colors.lightgrey,
+            ),
+            (
+                "FONTNAME",
+                (0, 0),
+                (0, -1),
+                "Helvetica-Bold",
+            ),
+            (
+                "PADDING",
+                (0, 0),
+                (-1, -1),
+                6,
+            ),
+        ])
+    )
+
+    story.append(
+        table
+    )
+
+    story.append(
+        Spacer(1, 20)
+    )
+
+
+    # -----------------------------------------------------
+    # EVIDENCE GATE
+    # -----------------------------------------------------
+
+    story.append(
+        Paragraph(
+            "<b>Evidence Gate</b>",
+            styles["Heading2"],
+        )
+    )
+
+    gate_status = (
+        "PASSED"
+        if gate_complete
+        else "NOT PASSED"
+    )
+
+    story.append(
+        Paragraph(
+            (
+                "<b>Status:</b> "
+                f"{pdf_text(gate_status)}"
+            ),
+            styles["BodyText"],
+        )
+    )
+
+    if missing_requirements:
+        story.append(
+            Spacer(1, 8)
+        )
+
+        story.append(
+            Paragraph(
+                "<b>Missing / Incomplete Requirements:</b>",
+                styles["BodyText"],
+            )
+        )
+
+        for item in missing_requirements:
+            if isinstance(
+                item,
+                dict,
+            ):
+                name = (
+                    item.get(
+                        "name"
+                    )
+                    or "Mandatory evidence requirement"
+                )
+
+                reason = (
+                    item.get(
+                        "reason"
+                    )
+                    or ""
+                )
+
+                evidence_rule = (
+                    item.get(
+                        "evidence_rule"
+                    )
+                    or ""
+                )
+
+                minimum_count = item.get(
+                    "minimum_count"
+                )
+
+                text = str(name)
+
+                if minimum_count is not None:
+                    text += (
+                        f" — Minimum required: "
+                        f"{minimum_count}"
+                    )
+
+                if reason:
+                    text += (
+                        f" — Reason: "
+                        f"{reason}"
+                    )
+
+                if evidence_rule:
+                    text += (
+                        f" — Policy / Evidence Rule: "
+                        f"{evidence_rule}"
+                    )
+
+            else:
+                text = str(item)
+
+            story.append(
+                Paragraph(
+                    f"• {pdf_text(text)}",
+                    styles["BodyText"],
+                )
+            )
+
+
+    # -----------------------------------------------------
+    # POLICY-DRIVEN REQUIREMENTS
+    # -----------------------------------------------------
+
+    if requirements:
+        story.append(
+            Spacer(1, 20)
+        )
+
+        story.append(
+            Paragraph(
+                "<b>Policy-Driven Requirements</b>",
+                styles["Heading2"],
+            )
+        )
+
+        for requirement in requirements:
+            if isinstance(
+                requirement,
+                dict,
+            ):
+                name = (
+                    requirement.get(
+                        "name"
+                    )
+                    or "Requirement"
+                )
+
+                mandatory = requirement.get(
+                    "mandatory",
+                    False,
+                )
+
+                status = (
+                    requirement.get(
+                        "status"
+                    )
+                    or "UNKNOWN"
+                )
+
+                reason = (
+                    requirement.get(
+                        "reason"
+                    )
+                    or ""
+                )
+
+                evidence_rule = (
+                    requirement.get(
+                        "evidence_rule"
+                    )
+                    or ""
+                )
+
+                minimum_count = requirement.get(
+                    "minimum_count"
+                )
+
+                text = str(name)
+
+                if mandatory:
+                    text += " — Mandatory"
+
+                if status:
+                    text += (
+                        f" — {status}"
+                    )
+
+                if minimum_count is not None:
+                    text += (
+                        f" — Minimum: "
+                        f"{minimum_count}"
+                    )
+
+                if reason:
+                    text += (
+                        f" — Reason: "
+                        f"{reason}"
+                    )
+
+                if evidence_rule:
+                    text += (
+                        f" — Policy / Evidence Rule: "
+                        f"{evidence_rule}"
+                    )
+
+            else:
+                text = str(requirement)
+
+            story.append(
+                Paragraph(
+                    f"• {pdf_text(text)}",
+                    styles["BodyText"],
+                )
+            )
+
+
+    # -----------------------------------------------------
+    # AI ASSESSMENT
+    # -----------------------------------------------------
+
+    story.append(
+        Spacer(1, 20)
+    )
+
+    story.append(
+        Paragraph(
+            "<b>AI Assessment</b>",
+            styles["Heading2"],
+        )
+    )
+
+    recommendation = safe_text(
+        review.get(
+            "recommendation"
+        )
+    )
+
+    story.append(
+        Paragraph(
+            (
+                "<b>AI Recommendation:</b> "
+                f"{pdf_text(recommendation)}"
+            ),
+            styles["BodyText"],
+        )
+    )
+
+    story.append(
+        Spacer(1, 10)
+    )
+
+    synthesis = extract_ai_text(
+        review.get(
+            "synthesis"
+        )
+    )
+
+    if synthesis:
+        story.append(
+            Paragraph(
+                "<b>Decision Synthesis</b>",
+                styles["Heading3"],
+            )
+        )
+
+        story.append(
+            Paragraph(
+                pdf_text(
+                    synthesis
+                ),
+                styles["BodyText"],
+            )
+        )
+
+    else:
+        story.append(
+            Paragraph(
+                "No AI synthesis available.",
+                styles["BodyText"],
+            )
+        )
+
+
+    # -----------------------------------------------------
+    # AGENT ASSESSMENTS
+    # -----------------------------------------------------
+
+    if review:
+        agent_sections = [
+            (
+                "Compliance Assessment",
+                review.get("compliance"),
+            ),
+            (
+                "Financial Assessment",
+                review.get("financial"),
+            ),
+            (
+                "Risk Assessment",
+                review.get("risk"),
+            ),
+        ]
+
+        story.append(
+            Spacer(1, 20)
+        )
+
+        story.append(
+            Paragraph(
+                "<b>Agent Assessments</b>",
+                styles["Heading2"],
+            )
+        )
+
+        for heading, value in agent_sections:
+            agent_text = extract_ai_text(
+                value
+            )
+
+            story.append(
+                Paragraph(
+                    f"<b>{html.escape(heading)}</b>",
+                    styles["Heading3"],
+                )
+            )
+
+            if agent_text:
+                story.append(
+                    Paragraph(
+                        pdf_text(agent_text),
+                        styles["BodyText"],
+                    )
+                )
+
+            else:
+                story.append(
+                    Paragraph(
+                        "No assessment available.",
+                        styles["BodyText"],
+                    )
+                )
+
+            story.append(
+                Spacer(1, 8)
+            )
+
+
+    # -----------------------------------------------------
+    # HUMAN DECISION
+    # -----------------------------------------------------
+
+    story.append(
+        Spacer(1, 20)
+    )
+
+    story.append(
+        Paragraph(
+            "<b>Human Decision</b>",
+            styles["Heading2"],
+        )
+    )
+
+    if decision:
+        story.append(
+            Paragraph(
+                (
+                    "<b>Final Decision:</b> "
+                    f"{pdf_text(decision.get('decision', 'N/A'))}"
+                ),
+                styles["BodyText"],
+            )
+        )
+
+        story.append(
+            Paragraph(
+                (
+                    "<b>Decision Date:</b> "
+                    f"{pdf_text(decision.get('created_at', 'N/A'))}"
+                ),
+                styles["BodyText"],
+            )
+        )
+
+        story.append(
+            Paragraph(
+                (
+                    "<b>Comments:</b> "
+                    f"{pdf_text(decision.get('comments') or 'None')}"
+                ),
+                styles["BodyText"],
+            )
+        )
+
+    else:
+        story.append(
+            Paragraph(
+                "No human decision has been recorded.",
+                styles["BodyText"],
+            )
+        )
+
+
+    # -----------------------------------------------------
+    # WORKFLOW STATUS
+    # -----------------------------------------------------
+
+    story.append(
+        Spacer(1, 20)
+    )
+
+    story.append(
+        Paragraph(
+            "<b>AI Workflow Checkpoints</b>",
+            styles["Heading2"],
+        )
+    )
+
+    workflow_data = [
+        [
+            "Step",
+            "Status",
+            "Provider",
+            "Model",
+        ]
+    ]
+
+    for step_name, label in STEP_DEFINITIONS:
+        step = step_map.get(
+            step_name,
+            {},
+        )
+
+        workflow_data.append(
+            [
+                label,
+                safe_text(
+                    step.get(
+                        "status",
+                        "PENDING",
+                    )
+                ),
+                safe_text(
+                    step.get(
+                        "provider"
+                    )
+                ),
+                safe_text(
+                    step.get(
+                        "model"
+                    )
+                ),
+            ]
+        )
+
+    workflow_table = Table(
+        workflow_data,
+        colWidths=[
+            150,
+            90,
+            90,
+            150,
+        ],
+        repeatRows=1,
+    )
+
+    workflow_table.setStyle(
+        TableStyle([
+            (
+                "GRID",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.grey,
+            ),
+            (
+                "BACKGROUND",
+                (0, 0),
+                (-1, 0),
+                colors.lightgrey,
+            ),
+            (
+                "FONTNAME",
+                (0, 0),
+                (-1, 0),
+                "Helvetica-Bold",
+            ),
+            (
+                "VALIGN",
+                (0, 0),
+                (-1, -1),
+                "TOP",
+            ),
+            (
+                "PADDING",
+                (0, 0),
+                (-1, -1),
+                5,
+            ),
+        ])
+    )
+
+    story.append(
+        workflow_table
+    )
+
+
+    # -----------------------------------------------------
+    # AUDIT TRAIL
+    # -----------------------------------------------------
+
+    story.append(
+        Spacer(1, 20)
+    )
+
+    story.append(
+        Paragraph(
+            "<b>Audit Trail</b>",
+            styles["Heading2"],
+        )
+    )
+
+    if audit_logs:
+        for log in audit_logs:
+            text = (
+                f"{log.get('created_at', 'N/A')} — "
+                f"{log.get('action', 'N/A')} — "
+                f"{log.get('details', '')}"
+            )
+
+            story.append(
+                Paragraph(
+                    pdf_text(text),
+                    styles["BodyText"],
+                )
+            )
+
+            story.append(
+                Spacer(1, 5)
+            )
+
+    else:
+        story.append(
+            Paragraph(
+                "No audit records available.",
+                styles["BodyText"],
+            )
+        )
+
+
+    # -----------------------------------------------------
+    # DISCLAIMER
+    # -----------------------------------------------------
+
+    story.append(
+        Spacer(1, 20)
+    )
+
+    story.append(
+        Paragraph(
+            (
+                "AegisAI — AI recommendations are advisory. "
+                "Human decisions are authoritative."
+            ),
+            styles["Italic"],
+        )
+    )
+
+
+    # -----------------------------------------------------
+    # BUILD PDF
+    # -----------------------------------------------------
+
+    document.build(
+        story
+    )
+
+    buffer.seek(0)
+
+    return buffer
+
+
+# =========================================================
 # DOWNLOAD PDF
-
 # =========================================================
 
 st.subheader("📥 Download Report")
 
+st.caption(
+    f"Report for Case #{case_id}: "
+    f"{safe_text(case.get('title'))}"
+)
+
 pdf_file = generate_pdf()
 
 st.download_button(
-label="Download PDF Report",
-data=pdf_file,
-file_name="AegisAI_Approval_Report.pdf",
-mime="application/pdf",
-type="primary",
-use_container_width=True,
+    label="Download PDF Report",
+    data=pdf_file,
+    file_name=(
+        f"AegisAI_Case_{case_id}_Approval_Report.pdf"
+    ),
+    mime="application/pdf",
+    type="primary",
+    use_container_width=True,
 )
 
+
 # =========================================================
-
 # PAGE NAVIGATION
-
 # =========================================================
 
 st.divider()
@@ -1702,29 +1667,22 @@ st.divider()
 nav_left, nav_right = st.columns(2)
 
 with nav_left:
-
-
-if st.button(
-    "← Case History",
-    use_container_width=True,
-    key="report_previous",
-):
-
-    st.switch_page(
-        "pages/5_Case_History.py"
-    )
+    if st.button(
+        "← Case History",
+        use_container_width=True,
+        key="report_previous",
+    ):
+        st.switch_page(
+            "pages/5_Case_History.py"
+        )
 
 
 with nav_right:
-
-
-if st.button(
-    "Back to Dashboard",
-    use_container_width=True,
-    key="report_dashboard",
-):
-
-    st.switch_page(
-        "pages/1_Dashboard.py"
-    )
-
+    if st.button(
+        "Back to Dashboard",
+        use_container_width=True,
+        key="report_dashboard",
+    ):
+        st.switch_page(
+            "pages/1_Dashboard.py"
+        )
