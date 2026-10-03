@@ -344,12 +344,80 @@ if "current_case_id" in st.session_state:
                 start=1
             ):
 
-                st.write(
-                    f"**{index}. "
-                    f"{document.get('document_name', '-')}"
-                    f"** — "
-                    f"{document.get('document_type', '-')}"
+                document_id = document.get("id")
+
+                document_name = document.get(
+                    "document_name",
+                    "-"
                 )
+
+                document_type_value = document.get(
+                    "document_type",
+                    "-"
+                )
+
+                col_info, col_remove = st.columns(
+                    [5, 1]
+                )
+
+                with col_info:
+
+                    st.write(
+                        f"**{index}. {document_name}**"
+                    )
+
+                    st.caption(
+                        f"Document Type: {document_type_value}"
+                    )
+
+                with col_remove:
+
+                    if st.button(
+                        "🗑️ Remove",
+                        key=f"remove_document_{document_id}",
+                        use_container_width=True
+                    ):
+
+                        try:
+
+                            delete_response = (
+                                supabase
+                                .table("documents")
+                                .delete()
+                                .eq(
+                                    "id",
+                                    document_id
+                                )
+                                .eq(
+                                    "case_id",
+                                    case_id
+                                )
+                                .execute()
+                            )
+
+                            st.success(
+                                f"{document_name} removed successfully."
+                            )
+
+                            # Remove any previous AI review because
+                            # the case evidence has changed.
+                            st.session_state.pop(
+                                "ai_case_review",
+                                None
+                            )
+
+                            st.session_state.pop(
+                                "ai_case_review_id",
+                                None
+                            )
+
+                            st.rerun()
+
+                        except Exception as e:
+
+                            st.error(
+                                f"Unable to remove document: {str(e)}"
+                            )
 
         else:
 
@@ -362,8 +430,6 @@ if "current_case_id" in st.session_state:
         st.error(
             f"Unable to load documents: {str(e)}"
         )
-
-
 # ==========================================
 # AI CASE REVIEW
 # ==========================================
