@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 
 from services.authentication import (
@@ -541,25 +540,3 @@ else:
     )
 
     navigation.run()
-```
-
-### What changed
-
-Only the sidebar structure was changed:
-
-**Before:** the sidebar was inside `show_application()`, so it was effectively tied to the AegisAI home page.
-
-**Now:** `show_sidebar()` is called **before `navigation.run()`** for every authenticated session.
-
-Therefore:
-
-**Dashboard → sidebar visible**
-**Create Case → sidebar visible**
-**Case Review → sidebar visible**
-**Decision → sidebar visible**
-**Case History → sidebar visible**
-**Reports → sidebar visible**
-
-And importantly, the existing bottom **Previous / Next** navigation remains untouched.
-
-This is the final navigation implementation; no changes to your AI/RAG/Supabase/application workflow are required.
