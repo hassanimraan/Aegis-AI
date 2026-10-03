@@ -245,23 +245,31 @@ def result_text(result):
 
 def extract_assessment(review, field_name):
     """
-    Retrieve one of the saved agent assessments from ai_reviews.
+    Retrieve a saved agent assessment from ai_reviews.
 
-    The current schema stores:
-        compliance_result
-        financial_result
-        risk_result
+    AegisAI stores the agent results using:
+        compliance
+        financial
+        risk
 
-    This helper also tolerates JSON strings.
+    The helper also supports the older *_result field names
+    so the report remains compatible with previously stored
+    review records.
     """
     if not review:
         return {}
 
-    return normalize_result(
-        review.get(field_name)
-    )
+    value = review.get(field_name)
 
+    if value is None:
+        legacy_field = f"{field_name}_result"
+        value = review.get(legacy_field)
 
+    if value is None:
+        return {}
+
+    return normalize_result(value)
+    
 def extract_synthesis(review):
     """
     Retrieve the Decision Synthesizer result.
@@ -636,21 +644,17 @@ if review:
 
     compliance_result = extract_assessment(
         review,
-        "compliance_result",
+        "compliance",
     )
 
     financial_result = extract_assessment(
         review,
-        "financial_result",
+        "financial",
     )
-
+    
     risk_result = extract_assessment(
         review,
-        "risk_result",
-    )
-
-    synthesis_result = extract_synthesis(
-        review,
+        "risk",
     )
 
 
@@ -1492,6 +1496,17 @@ def generate_pdf():
             review.get("recommendation"),
             "N/A",
         )
+        
+        if recommendation.startswith("OVERALL STATUS:"):
+            synthesis_recommendation = (
+                synthesis_result.get("ai_recommendation")
+                or synthesis_result.get("recommendation")
+            )
+        
+            if synthesis_recommendation:
+                recommendation = safe_text(
+                    synthesis_recommendation
+                )
 
         story.append(
             Paragraph(
