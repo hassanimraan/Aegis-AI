@@ -1,9 +1,4 @@
-from google import genai
-
-from config.settings import get_gemini_api_key
-
-
-MODEL = "gemini-3.5-flash"
+from services.llm_router import generate_with_fallback
 
 
 def run_financial_agent(
@@ -11,10 +6,6 @@ def run_financial_agent(
     documents,
     policy_evidence
 ):
-    client = genai.Client(
-        api_key=get_gemini_api_key()
-    )
-
     document_text = "\n\n".join(
         [
             f"DOCUMENT: {doc['document_name']}\n"
@@ -65,20 +56,16 @@ IMPORTANT RULES:
 - Do not make the final human approval decision.
 - The Financial Agent's own analysis is NOT evidence that an
   organizational financial review has been completed.
-
 - Only documents explicitly showing a completed financial review
   may be used as evidence for the Financial Review requirement.
-
 - A Purchase Request, Business Justification, quotation,
   technical evaluation, comparative statement, or Approval Request
   must NOT be treated as evidence that the Finance Department has
   completed its financial review unless the document explicitly
   contains such evidence.
-
 - If no supplied document explicitly demonstrates a completed
   financial review, the Financial Review requirement MUST be
   marked ATTENTION.
-
 - Do not mark Financial Review as PASS merely because the case
   has been submitted for AI financial analysis.
 
@@ -159,9 +146,4 @@ require clarification/escalation.
 Do not provide a final human approval decision.
 """
 
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=prompt
-    )
-
-    return response.text
+    return generate_with_fallback(prompt)
