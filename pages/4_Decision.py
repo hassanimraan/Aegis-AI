@@ -1,20 +1,16 @@
-import streamlit as st
 import json
+
+import streamlit as st
 
 from database.supabase_client import get_supabase
 from rag.retriever import search_policies
-from config.settings import get_gemini_api_key
-
-from google import genai
-
-
-MODEL = "gemini-3.6-flash"
+from services.llm_router import generate_with_fallback
 
 
 st.set_page_config(
     page_title="Human Decision - AegisAI",
     page_icon="⚖️",
-    layout="wide"
+    layout="wide",
 )
 
 
@@ -26,11 +22,9 @@ if (
     "user" not in st.session_state
     or st.session_state["user"] is None
 ):
-
     st.warning(
         "Please log in from the main AegisAI page."
     )
-
     st.stop()
 
 
@@ -38,37 +32,27 @@ if (
 # Page Navigation Helper
 # ---------------------------------------------------------
 
-def show_page_navigation(
-    previous_key,
-    next_key
-):
-
+def show_page_navigation(previous_key, next_key):
     st.divider()
 
-    nav_left, nav_right = st.columns(
-        [1, 1]
-    )
+    nav_left, nav_right = st.columns(2)
 
     with nav_left:
-
         if st.button(
             "← Case Review",
             use_container_width=True,
-            key=previous_key
+            key=previous_key,
         ):
-
             st.switch_page(
                 "pages/3_Case_Review.py"
             )
 
     with nav_right:
-
         if st.button(
             "Next: Case History →",
             use_container_width=True,
-            key=next_key
+            key=next_key,
         ):
-
             st.switch_page(
                 "pages/5_Case_History.py"
             )
@@ -81,8 +65,8 @@ def show_page_navigation(
 st.title("⚖️ Human Review & Decision")
 
 st.write(
-    "Review the AI assessment, ask grounded questions using the "
-    "AegisAI assistant, and make the final human decision."
+    "Review the AI assessment, ask grounded questions using "
+    "the AegisAI assistant, and make the final human decision."
 )
 
 st.divider()
@@ -93,18 +77,16 @@ st.divider()
 # ---------------------------------------------------------
 
 try:
-
     supabase = get_supabase()
 
 except Exception as e:
-
     st.error(
         f"Unable to connect to Supabase: {e}"
     )
 
     show_page_navigation(
         "decision_previous_db_error",
-        "decision_next_db_error"
+        "decision_next_db_error",
     )
 
     st.stop()
@@ -115,18 +97,17 @@ except Exception as e:
 # ---------------------------------------------------------
 
 try:
-
     response = (
         supabase
         .table("cases")
         .select("*")
         .eq(
             "user_id",
-            st.session_state["user"].id
+            st.session_state["user"].id,
         )
         .order(
             "created_at",
-            desc=True
+            desc=True,
         )
         .execute()
     )
@@ -134,32 +115,26 @@ try:
     cases = response.data or []
 
 except Exception as e:
-
     st.error(
         f"Unable to load cases: {e}"
     )
 
     show_page_navigation(
         "decision_previous_cases_error",
-        "decision_next_cases_error"
+        "decision_next_cases_error",
     )
 
     st.stop()
 
 
-# ---------------------------------------------------------
-# No Cases
-# ---------------------------------------------------------
-
 if not cases:
-
     st.info(
         "No approval cases are available for human review."
     )
 
     show_page_navigation(
         "decision_previous_no_cases",
-        "decision_next_no_cases"
+        "decision_next_no_cases",
     )
 
     st.stop()
@@ -170,17 +145,19 @@ if not cases:
 # ---------------------------------------------------------
 
 case_options = {
-    f"{case['title']} — PKR {float(case['amount']):,.0f}": case
+    f"{case.get('title', 'Untitled')} — "
+    f"PKR {float(case.get('amount', 0)):,.0f}":
+        case
     for case in cases
 }
 
-
 selected_label = st.selectbox(
     "Select Approval Case",
-    list(case_options.keys())
+    list(case_options.keys()),
 )
 
 case = case_options[selected_label]
+current_case_id = case["id"]
 
 
 # ---------------------------------------------------------
@@ -192,23 +169,20 @@ st.subheader("📋 Case Information")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-
     st.write(
-        f"**Title:** {case['title']}"
+        f"**Title:** {case.get('title', '—')}"
     )
 
 with col2:
-
     st.write(
-        f"**Department:** {case['department']}"
+        f"**Department:** {case.get('department', '—')}"
     )
 
 with col3:
-
     st.write(
-        f"**Amount:** PKR {float(case['amount']):,.0f}"
+        f"**Amount:** PKR "
+        f"{float(case.get('amount', 0)):,.0f}"
     )
-
 
 st.write(
     f"**Status:** {case.get('status', 'UNKNOWN')}"
@@ -220,8 +194,6 @@ st.divider()
 # ---------------------------------------------------------
 # Reset Chat When Case Changes
 # ---------------------------------------------------------
-
-current_case_id = case["id"]
 
 if st.session_state.get(
     "decision_chat_case_id"
@@ -241,18 +213,17 @@ if st.session_state.get(
 # ---------------------------------------------------------
 
 try:
-
     review_response = (
         supabase
         .table("ai_reviews")
         .select("*")
         .eq(
             "case_id",
-            current_case_id
+            current_case_id,
         )
         .order(
             "created_at",
-            desc=True
+            desc=True,
         )
         .limit(1)
         .execute()
@@ -260,23 +231,14 @@ try:
 
     reviews = review_response.data or []
 
-    if reviews:
-
-        latest_review = reviews[0]
-
-        st.session_state[
-            "ai_case_review_db"
-        ] = latest_review
-
 except Exception as e:
-
     st.error(
         f"Unable to load AI review: {e}"
     )
 
     show_page_navigation(
         "decision_previous_review_error",
-        "decision_next_review_error"
+        "decision_next_review_error",
     )
 
     st.stop()
@@ -287,7 +249,6 @@ except Exception as e:
 # ---------------------------------------------------------
 
 if not reviews:
-
     st.warning(
         "No completed AI review is available for this case."
     )
@@ -297,13 +258,9 @@ if not reviews:
         "before a human final decision can be recorded."
     )
 
-    # -----------------------------------------------------
-    # Navigation MUST appear before st.stop()
-    # -----------------------------------------------------
-
     show_page_navigation(
         "decision_previous_no_review",
-        "decision_next_no_review"
+        "decision_next_no_review",
     )
 
     st.stop()
@@ -313,14 +270,49 @@ review = reviews[0]
 
 
 # ---------------------------------------------------------
-# AI Recommendation
+# Parse Evidence Gate
+# ---------------------------------------------------------
+
+gate = review.get("evidence_gate", {})
+
+if isinstance(gate, str):
+    try:
+        gate = json.loads(gate)
+    except Exception:
+        gate = {}
+
+if not isinstance(gate, dict):
+    gate = {}
+
+
+# ---------------------------------------------------------
+# Parse Requirements
+# ---------------------------------------------------------
+
+requirements = review.get(
+    "requirements",
+    [],
+)
+
+if isinstance(requirements, str):
+    try:
+        requirements = json.loads(requirements)
+    except Exception:
+        requirements = []
+
+if not isinstance(requirements, list):
+    requirements = []
+
+
+# ---------------------------------------------------------
+# AI Assessment
 # ---------------------------------------------------------
 
 st.subheader("🤖 AI Assessment")
 
 recommendation = review.get(
     "recommendation",
-    "Not available"
+    "Not available",
 )
 
 st.info(
@@ -330,30 +322,70 @@ st.info(
 
 with st.expander(
     "View Consolidated AI Assessment",
-    expanded=True
+    expanded=True,
 ):
-
     st.write(
         review.get(
             "synthesis",
-            "No consolidated assessment available."
+            "No consolidated assessment available.",
         )
     )
 
 
+# ---------------------------------------------------------
+# Evidence Gate
+# ---------------------------------------------------------
+
 st.divider()
 
+st.subheader("🔐 Evidence Gate")
 
-# ---------------------------------------------------------
-# Grounded Chatbot
-# ---------------------------------------------------------
+if gate.get("complete", False):
 
-st.subheader("💬 AegisAI Review Assistant")
+    st.success(
+        "✅ Evidence Gate PASSED — "
+        "all identified mandatory evidence is available."
+    )
 
-st.write(
-    "Ask questions about the case, supplied documents, "
-    "or applicable PEIS policies."
-)
+else:
+
+    missing_count = gate.get(
+        "missing_count",
+        0,
+    )
+
+    st.error(
+        f"🔴 Evidence Gate BLOCKED — "
+        f"{missing_count} mandatory requirement(s) missing."
+    )
+
+    missing = gate.get(
+        "missing",
+        [],
+    )
+
+    if isinstance(missing, list) and missing:
+
+        st.subheader("📋 Missing Evidence")
+
+        for item in missing:
+
+            st.write(
+                f"❌ **{item.get('name', 'Requirement')}**"
+            )
+
+            reason = item.get("reason")
+
+            if reason:
+                st.caption(reason)
+
+    else:
+
+        st.info(
+            "The Evidence Gate is incomplete, "
+            "but no specific missing requirement "
+            "was returned."
+        )
 
 
 # ---------------------------------------------------------
@@ -361,14 +393,13 @@ st.write(
 # ---------------------------------------------------------
 
 try:
-
     documents_response = (
         supabase
         .table("documents")
         .select("*")
         .eq(
             "case_id",
-            current_case_id
+            current_case_id,
         )
         .execute()
     )
@@ -385,12 +416,26 @@ except Exception as e:
 
 
 # ---------------------------------------------------------
+# Grounded Review Assistant
+# ---------------------------------------------------------
+
+st.divider()
+
+st.subheader("💬 AegisAI Review Assistant")
+
+st.write(
+    "Ask questions about the case, supplied documents, "
+    "or applicable PEIS policies."
+)
+
+
+# ---------------------------------------------------------
 # Display Previous Messages
 # ---------------------------------------------------------
 
 for message in st.session_state.get(
     "decision_chat_messages",
-    []
+    [],
 ):
 
     with st.chat_message(
@@ -412,12 +457,13 @@ question = st.text_input(
         "Why does this case require "
         "three vendor quotations?"
     ),
-    key="decision_chat_input"
+    key="decision_chat_input",
 )
 
 send_question = st.button(
     "Send Question",
-    type="primary"
+    type="primary",
+    key="send_decision_question",
 )
 
 
@@ -432,15 +478,12 @@ if send_question and question.strip():
     ].append(
         {
             "role": "user",
-            "content": question
+            "content": question.strip(),
         }
     )
 
     with st.chat_message("user"):
-
-        st.write(
-            question
-        )
+        st.write(question.strip())
 
     try:
 
@@ -449,17 +492,17 @@ if send_question and question.strip():
         # -------------------------------------------------
 
         policy_evidence = search_policies(
-            question,
-            top_k=6
+            question.strip(),
+            top_k=6,
         )
 
         policy_text = "\n\n".join(
             [
-                f"{item['policy_id']} — "
-                f"{item['policy_name']}\n"
-                f"{item['section_id']} — "
-                f"{item['section_title']}\n"
-                f"{item['content']}"
+                f"{item.get('policy_id', '')} — "
+                f"{item.get('policy_name', '')}\n"
+                f"{item.get('section_id', '')} — "
+                f"{item.get('section_title', '')}\n"
+                f"{item.get('content', '')}"
                 for item in policy_evidence
             ]
         )
@@ -471,8 +514,10 @@ if send_question and question.strip():
 
         document_text = "\n\n".join(
             [
-                f"DOCUMENT: {doc['document_name']}\n"
-                f"TYPE: {doc['document_type']}\n"
+                f"DOCUMENT: "
+                f"{doc.get('document_name', '')}\n"
+                f"TYPE: "
+                f"{doc.get('document_type', '')}\n"
                 f"CONTENT:\n"
                 f"{doc.get('extracted_text', '')}"
                 for doc in documents
@@ -496,7 +541,7 @@ if send_question and question.strip():
 
 
         # -------------------------------------------------
-        # Gemini Prompt
+        # Grounded Prompt
         # -------------------------------------------------
 
         prompt = f"""
@@ -570,7 +615,7 @@ PREVIOUS CONVERSATION
 USER QUESTION
 ==================================================
 
-{question}
+{question.strip()}
 
 Answer clearly and briefly.
 
@@ -584,19 +629,22 @@ Do not provide a final human decision.
 
 
         # -------------------------------------------------
-        # Gemini
+        # LLM Fallback Router
         # -------------------------------------------------
 
-        client = genai.Client(
-            api_key=get_gemini_api_key()
+        llm_result = generate_with_fallback(
+            prompt
         )
 
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=prompt
+        answer = llm_result.get(
+            "text",
+            "",
         )
 
-        answer = response.text
+        if not answer:
+            raise ValueError(
+                "The review assistant returned an empty response."
+            )
 
 
         # -------------------------------------------------
@@ -604,10 +652,7 @@ Do not provide a final human decision.
         # -------------------------------------------------
 
         with st.chat_message("assistant"):
-
-            st.write(
-                answer
-            )
+            st.write(answer)
 
 
         # -------------------------------------------------
@@ -619,7 +664,7 @@ Do not provide a final human decision.
         ].append(
             {
                 "role": "assistant",
-                "content": answer
+                "content": answer,
             }
         )
 
@@ -632,18 +677,10 @@ Do not provide a final human decision.
 
 
 # ---------------------------------------------------------
-# PAGE NAVIGATION
-# ---------------------------------------------------------
-
-show_page_navigation(
-    "decision_previous",
-    "decision_next"
-)
-
-
-# ---------------------------------------------------------
 # Human Final Decision
 # ---------------------------------------------------------
+
+st.divider()
 
 st.subheader("👤 Human Final Decision")
 
@@ -667,11 +704,11 @@ try:
         )
         .eq(
             "case_id",
-            current_case_id
+            current_case_id,
         )
         .order(
             "created_at",
-            desc=True
+            desc=True,
         )
         .limit(1)
         .execute()
@@ -699,17 +736,17 @@ if existing_decisions:
     previous_decision = existing_decisions[0]
 
     st.success(
-        f"✅ Final decision already recorded: "
+        "✅ Final decision already recorded: "
         f"{previous_decision.get('decision', 'N/A')}"
     )
 
     st.write(
-        f"**Decision Date:** "
+        "**Decision Date:** "
         f"{previous_decision.get('created_at', 'N/A')}"
     )
 
     st.write(
-        f"**Reviewer Comments:** "
+        "**Reviewer Comments:** "
         f"{previous_decision.get('comments') or 'None'}"
     )
 
@@ -725,34 +762,7 @@ if existing_decisions:
 
 else:
 
-    # -----------------------------------------------------
-    # Evidence Gate Protection
-    # -----------------------------------------------------
-
-    gate = review.get(
-        "evidence_gate"
-    )
-
-    if isinstance(gate, str):
-
-        try:
-
-            gate = json.loads(gate)
-
-        except Exception:
-
-            gate = {}
-
-
-    if not isinstance(gate, dict):
-
-        gate = {}
-
-
-    if not gate.get(
-        "complete",
-        False
-    ):
+    if not gate.get("complete", False):
 
         st.error(
             "🔴 FINAL DECISION LOCKED"
@@ -760,28 +770,18 @@ else:
 
         st.warning(
             "Mandatory policy-required evidence is incomplete. "
-            "Please upload the missing evidence and run AI Case "
-            "Review again before making the final decision."
+            "Please upload the missing evidence and run AI "
+            "Case Review again before making the final decision."
         )
 
-        st.subheader(
-            "📋 Missing Evidence"
-        )
+        st.subheader("📋 Missing Evidence")
 
         missing = gate.get(
             "missing",
-            []
+            [],
         )
 
-        if not isinstance(
-            missing,
-            list
-        ):
-
-            missing = []
-
-
-        if missing:
+        if isinstance(missing, list) and missing:
 
             for item in missing:
 
@@ -790,7 +790,6 @@ else:
                 )
 
                 if item.get("reason"):
-
                     st.caption(
                         item["reason"]
                     )
@@ -803,154 +802,173 @@ else:
                 "was returned."
             )
 
-        st.stop()
+    else:
 
+        st.success(
+            "🟢 Evidence Gate passed. "
+            "Human decision controls are available."
+        )
 
-    # -----------------------------------------------------
-    # Evidence Complete
-    # -----------------------------------------------------
-
-    decision = st.radio(
-        "Select Decision",
-        [
-            "Approve",
-            "Return",
-            "Reject"
-        ],
-        horizontal=True
-    )
-
-
-    comments = st.text_area(
-        "Reviewer Comments",
-        placeholder="Enter your decision comments..."
-    )
-
-
-    if decision in [
-        "Return",
-        "Reject"
-    ] and not comments.strip():
-
-        st.info(
-            "Reviewer comments are required for "
-            "Return or Reject."
+        decision = st.radio(
+            "Select Decision",
+            [
+                "Approve",
+                "Return",
+                "Reject",
+            ],
+            horizontal=True,
+            key="human_decision_choice",
         )
 
 
-    # -----------------------------------------------------
-    # Submit Decision
-    # -----------------------------------------------------
+        comments = st.text_area(
+            "Reviewer Comments",
+            placeholder=(
+                "Enter your decision comments..."
+            ),
+            key="human_decision_comments",
+        )
 
-    if st.button(
-        "Submit Final Decision",
-        type="primary",
-        use_container_width=True
-    ):
 
         if decision in [
             "Return",
-            "Reject"
+            "Reject",
         ] and not comments.strip():
 
-            st.error(
-                "Please enter reviewer comments."
-            )
-
-            st.stop()
-
-
-        try:
-
-            # ---------------------------------------------
-            # Save Human Decision
-            # ---------------------------------------------
-
-            supabase.table(
-                "decisions"
-            ).insert(
-                {
-                    "case_id": current_case_id,
-                    "reviewer_id": (
-                        st.session_state["user"].id
-                    ),
-                    "decision": decision,
-                    "comments": comments.strip()
-                }
-            ).execute()
-
-
-            # ---------------------------------------------
-            # Update Case Status
-            # ---------------------------------------------
-
-            status_map = {
-                "Approve": "APPROVED",
-                "Return": "RETURNED",
-                "Reject": "REJECTED"
-            }
-
-            new_status = status_map[
-                decision
-            ]
-
-
-            supabase.table(
-                "cases"
-            ).update(
-                {
-                    "status": new_status
-                }
-            ).eq(
-                "id",
-                current_case_id
-            ).execute()
-
-
-            # ---------------------------------------------
-            # Create Audit Log
-            # ---------------------------------------------
-
-            supabase.table(
-                "audit_logs"
-            ).insert(
-                {
-                    "case_id": current_case_id,
-                    "user_id": (
-                        st.session_state["user"].id
-                    ),
-                    "action": (
-                        f"HUMAN_DECISION_"
-                        f"{decision.upper()}"
-                    ),
-                    "details": (
-                        f"Human reviewer selected "
-                        f"{decision}. "
-                        f"Comments: "
-                        f"{comments.strip() or 'None'}"
-                    )
-                }
-            ).execute()
-
-
-            # ---------------------------------------------
-            # Confirmation
-            # ---------------------------------------------
-
-            st.success(
-                f"✅ Human decision saved successfully: "
-                f"{decision}"
-            )
-
             st.info(
-                f"Case status updated to: {new_status}"
+                "Reviewer comments are required for "
+                "Return or Reject."
             )
 
-            st.rerun()
+
+        # -------------------------------------------------
+        # Submit Decision
+        # -------------------------------------------------
+
+        if st.button(
+            "Submit Final Decision",
+            type="primary",
+            use_container_width=True,
+            key="submit_human_decision",
+        ):
+
+            if decision in [
+                "Return",
+                "Reject",
+            ] and not comments.strip():
+
+                st.error(
+                    "Please enter reviewer comments."
+                )
+
+            else:
+
+                try:
+
+                    # -------------------------------------
+                    # Save Human Decision
+                    # -------------------------------------
+
+                    supabase.table(
+                        "decisions"
+                    ).insert(
+                        {
+                            "case_id": current_case_id,
+                            "reviewer_id": (
+                                st.session_state[
+                                    "user"
+                                ].id
+                            ),
+                            "decision": decision,
+                            "comments": comments.strip(),
+                        }
+                    ).execute()
 
 
-        except Exception as e:
+                    # -------------------------------------
+                    # Update Case Status
+                    # -------------------------------------
 
-            st.error(
-                f"Unable to save the human decision: {e}"
-            )
+                    status_map = {
+                        "Approve": "APPROVED",
+                        "Return": "RETURNED",
+                        "Reject": "REJECTED",
+                    }
+
+                    new_status = status_map[
+                        decision
+                    ]
+
+
+                    supabase.table(
+                        "cases"
+                    ).update(
+                        {
+                            "status": new_status,
+                        }
+                    ).eq(
+                        "id",
+                        current_case_id,
+                    ).execute()
+
+
+                    # -------------------------------------
+                    # Audit Log
+                    # -------------------------------------
+
+                    supabase.table(
+                        "audit_logs"
+                    ).insert(
+                        {
+                            "case_id": current_case_id,
+                            "user_id": (
+                                st.session_state[
+                                    "user"
+                                ].id
+                            ),
+                            "action": (
+                                "HUMAN_DECISION_"
+                                f"{decision.upper()}"
+                            ),
+                            "details": (
+                                "Human reviewer selected "
+                                f"{decision}. "
+                                "Comments: "
+                                f"{comments.strip() or 'None'}"
+                            ),
+                        }
+                    ).execute()
+
+
+                    # -------------------------------------
+                    # Confirmation
+                    # -------------------------------------
+
+                    st.success(
+                        "✅ Human decision saved successfully: "
+                        f"{decision}"
+                    )
+
+                    st.info(
+                        f"Case status updated to: {new_status}"
+                    )
+
+                    st.rerun()
+
+
+                except Exception as e:
+
+                    st.error(
+                        "Unable to save the human decision: "
+                        f"{e}"
+                    )
+
+
+# ---------------------------------------------------------
+# PAGE NAVIGATION
+# ---------------------------------------------------------
+
+show_page_navigation(
+    "decision_previous",
+    "decision_next",
+)
