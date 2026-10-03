@@ -5,29 +5,29 @@ from pypdf import PdfReader
 
 from database.supabase_client import get_supabase
 
+
 st.set_page_config(
-page_title="Case History - AegisAI",
-page_icon="📚",
-layout="wide",
+    page_title="Case History - AegisAI",
+    page_icon="📚",
+    layout="wide",
 )
 
+
 # ---------------------------------------------------------
-
 # Authentication
-
 # ---------------------------------------------------------
 
 if (
-"user" not in st.session_state
-or st.session_state["user"] is None
+    "user" not in st.session_state
+    or st.session_state["user"] is None
 ):
-st.warning(
-"Please log in from the main AegisAI page."
-)
-st.stop()
+    st.warning(
+        "Please log in from the main AegisAI page."
+    )
+    st.stop()
+
 
 user = st.session_state["user"]
-
 # ---------------------------------------------------------
 
 # Supabase
