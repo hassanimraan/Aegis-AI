@@ -591,18 +591,18 @@ if not cases:
 # ---------------------------------------------------------
 
 case_options = {
-    f"{case.get('title', 'Untitled')} — "
-    f"PKR {float(case.get('amount', 0)):,.0f}":
-        case
+    (
+        f"{case.get('title', 'Untitled')} — "
+        f"PKR {float(case.get('amount', 0)):,.0f} "
+        f"— Case #{case.get('id')}"
+    ): case
     for case in cases
 }
-
 
 selected_label = st.selectbox(
     "Select Case",
     list(case_options.keys()),
 )
-
 
 case = case_options[selected_label]
 
