@@ -455,51 +455,37 @@ def result_text(result):
 # ============================================================
 
 def extract_assessment(review, field_name):
-    """
-    Extract an AI assessment from:
-
-        compliance_result
-        financial_result
-        risk_result
-
-    Falls back to the legacy field name if necessary.
-    """
-
     if not review:
-        return {}
+        return ""
 
-    value = review.get(
-        f"{field_name}_result"
-    )
+    value = review.get(f"{field_name}_result")
 
-    if not has_value(value):
+    if has_value(value):
+        return str(value).strip()
 
-        value = review.get(
-            field_name
-        )
+    value = review.get(field_name)
 
-    return normalize_result(value)
+    if has_value(value):
+        return str(value).strip()
+
+    return ""
 
 
 def extract_synthesis(review):
-    """
-    Extract the Decision Synthesizer output.
-    """
-
     if not review:
-        return {}
+        return ""
 
-    value = review.get(
-        "synthesis"
-    )
+    value = review.get("synthesis")
 
-    if not has_value(value):
+    if has_value(value):
+        return str(value).strip()
 
-        value = review.get(
-            "recommendation"
-        )
+    value = review.get("recommendation")
 
-    return normalize_result(value)
+    if has_value(value):
+        return str(value).strip()
+
+    return ""
 
 
 # ============================================================
