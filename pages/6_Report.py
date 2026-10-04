@@ -1344,6 +1344,9 @@ try:
         .execute()
     )
 
+    st.write("DEBUG — AI REVIEWS DATA")
+    st.json(review_response.data)
+
     reviews = (
         review_response.data
         or []
