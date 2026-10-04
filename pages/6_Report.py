@@ -1,4 +1,5 @@
 import json
+import re
 from io import BytesIO
 from html import escape
 
@@ -111,6 +112,68 @@ def get_case_id(case):
         return case.get("id")
 
 
+def has_value(value):
+    """
+    Return True when a database value actually contains data.
+    """
+
+    if value is None:
+        return False
+
+    if isinstance(value, str):
+        return bool(value.strip())
+
+    if isinstance(value, (dict, list)):
+        return len(value) > 0
+
+    return True
+
+
+def merge_ai_review_rows(reviews):
+    """
+    Merge all ai_reviews rows for the selected case.
+
+    Rows are expected to be ordered newest first.
+
+    For each important AI result field, the newest non-empty
+    value is selected. This protects the report from cases where
+    the latest ai_reviews row contains metadata but the actual
+    AI result exists in another row.
+    """
+
+    if not reviews:
+        return None
+
+    # Start with newest row so general metadata remains current.
+    merged = dict(reviews[0])
+
+    result_fields = [
+        "compliance_result",
+        "financial_result",
+        "risk_result",
+        "synthesis",
+        "recommendation",
+        "human_review_required",
+        "requirements",
+        "evidence_gate",
+    ]
+
+    for field in result_fields:
+
+        for row in reviews:
+
+            if not isinstance(row, dict):
+                continue
+
+            value = row.get(field)
+
+            if has_value(value):
+                merged[field] = value
+                break
+
+    return merged
+
+
 def normalize_result(value):
     """
     Normalize an AI result while preserving plain-text AI output.
@@ -119,9 +182,7 @@ def normalize_result(value):
     - JSON/dict
     - JSON-encoded string
     - Plain-text AI assessment
-
-    Plain-text results are returned as:
-        {"text": "..."}
+    - List
     """
 
     if value is None:
@@ -134,6 +195,7 @@ def normalize_result(value):
         return {"items": value}
 
     if isinstance(value, str):
+
         text = value.strip()
 
         if not text:
@@ -147,8 +209,6 @@ def normalize_result(value):
         if isinstance(parsed, list):
             return {"items": parsed}
 
-        # AI results in ai_reviews are currently stored
-        # as plain text.
         return {"text": text}
 
     return {"text": str(value)}
@@ -157,19 +217,13 @@ def normalize_result(value):
 def result_text(result):
     """
     Convert an AI result into readable text.
-
-    Supports:
-    - plain text
-    - JSON strings
-    - dictionaries containing text
-    - structured dictionaries
-    - lists
     """
 
     if result is None:
         return "No assessment available."
 
     if isinstance(result, str):
+
         text = result.strip()
 
         if not text:
@@ -183,12 +237,14 @@ def result_text(result):
         return text
 
     if isinstance(result, list):
+
         if not result:
             return "No assessment available."
 
         lines = []
 
         for index, item in enumerate(result, start=1):
+
             if isinstance(item, dict):
                 lines.append(
                     f"{index}. {result_text(item)}"
@@ -203,8 +259,9 @@ def result_text(result):
     if not isinstance(result, dict):
         return safe_text(result)
 
-    # Plain-text result stored by normalize_result()
+    # Plain-text result
     if result.get("text"):
+
         return safe_text(
             result.get("text"),
             "No assessment available.",
@@ -229,18 +286,22 @@ def result_text(result):
     sections = []
 
     for key in preferred_keys:
+
         value = result.get(key)
 
         if value is None:
             continue
 
         if isinstance(value, list):
+
             if value:
+
                 sections.append(
                     f"{key.replace('_', ' ').title()}:"
                 )
 
                 for item in value:
+
                     if isinstance(item, dict):
                         sections.append(
                             f"• {result_text(item)}"
@@ -251,17 +312,20 @@ def result_text(result):
                         )
 
         elif isinstance(value, dict):
+
             sections.append(
                 f"{key.replace('_', ' ').title()}:"
             )
 
             for sub_key, sub_value in value.items():
+
                 sections.append(
                     f"{sub_key.replace('_', ' ').title()}: "
                     f"{safe_text(sub_value)}"
                 )
 
         else:
+
             sections.append(
                 f"{key.replace('_', ' ').title()}: "
                 f"{safe_text(value)}"
@@ -273,15 +337,18 @@ def result_text(result):
     fallback = []
 
     for key, value in result.items():
+
         if value is None:
             continue
 
         if isinstance(value, list):
+
             fallback.append(
                 f"{key.replace('_', ' ').title()}:"
             )
 
             for item in value:
+
                 if isinstance(item, dict):
                     fallback.append(
                         f"• {result_text(item)}"
@@ -292,17 +359,20 @@ def result_text(result):
                     )
 
         elif isinstance(value, dict):
+
             fallback.append(
                 f"{key.replace('_', ' ').title()}:"
             )
 
             for sub_key, sub_value in value.items():
+
                 fallback.append(
                     f"{sub_key.replace('_', ' ').title()}: "
                     f"{safe_text(sub_value)}"
                 )
 
         else:
+
             fallback.append(
                 f"{key.replace('_', ' ').title()}: "
                 f"{safe_text(value)}"
@@ -320,14 +390,10 @@ def result_text(result):
 
 def extract_assessment(review, field_name):
     """
-    Extract an AI assessment from the actual ai_reviews
-    database fields:
-
+    Extract:
         compliance_result
         financial_result
         risk_result
-
-    These fields currently contain plain-text AI output.
     """
 
     if not review:
@@ -337,7 +403,7 @@ def extract_assessment(review, field_name):
         f"{field_name}_result"
     )
 
-    if value is None:
+    if not has_value(value):
         value = review.get(field_name)
 
     return normalize_result(value)
@@ -346,8 +412,6 @@ def extract_assessment(review, field_name):
 def extract_synthesis(review):
     """
     Extract the Decision Synthesizer output.
-
-    The current database stores synthesis as plain text.
     """
 
     if not review:
@@ -355,10 +419,42 @@ def extract_synthesis(review):
 
     value = review.get("synthesis")
 
-    if value is None:
+    if not has_value(value):
         value = review.get("recommendation")
 
     return normalize_result(value)
+
+
+def normalize_heading(value):
+    """
+    Normalize headings returned by Gemini.
+
+    Handles examples such as:
+
+        EXECUTIVE SUMMARY:
+        **EXECUTIVE SUMMARY:**
+        ### EXECUTIVE SUMMARY:
+        ## EXECUTIVE SUMMARY
+    """
+
+    text = str(value).strip()
+
+    text = re.sub(
+        r"^#+\s*",
+        "",
+        text,
+    )
+
+    text = text.replace("**", "")
+    text = text.replace("__", "")
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    )
+
+    return text.strip().upper()
 
 
 def extract_ai_recommendation(
@@ -366,43 +462,29 @@ def extract_ai_recommendation(
     synthesis_result,
 ):
     """
-    Extract the AI RECOMMENDATION value from the synthesis.
-
-    Expected format:
-
-        AI RECOMMENDATION:
-        RETURN FOR CLARIFICATION
+    Extract AI RECOMMENDATION from synthesis.
     """
 
-    # --------------------------------------------------------
-    # 1. Structured synthesis
-    # --------------------------------------------------------
-
-    if isinstance(
-        synthesis_result,
-        dict,
-    ):
+    if isinstance(synthesis_result, dict):
 
         for key in (
             "ai_recommendation",
             "recommendation",
         ):
 
-            value = synthesis_result.get(
-                key
-            )
+            value = synthesis_result.get(key)
 
-            if value:
+            if has_value(value):
+
+                if isinstance(value, (dict, list)):
+                    return result_text(value)
+
                 return safe_text(
                     value,
                     "N/A",
                 )
 
-        # Plain-text synthesis normalized
-        # as {"text": "..."}
-        text = synthesis_result.get(
-            "text"
-        )
+        text = synthesis_result.get("text")
 
         if text:
 
@@ -415,33 +497,28 @@ def extract_ai_recommendation(
             if recommendation:
                 return recommendation
 
-    # --------------------------------------------------------
-    # 2. Direct synthesis database field
-    # --------------------------------------------------------
-
-    synthesis = review.get(
-        "synthesis"
-    )
+    synthesis = review.get("synthesis") if review else None
 
     if synthesis:
 
+        if isinstance(synthesis, dict):
+            synthesis_text = result_text(synthesis)
+        else:
+            synthesis_text = str(synthesis)
+
         recommendation = (
             extract_recommendation_from_text(
-                str(synthesis)
+                synthesis_text
             )
         )
 
         if recommendation:
             return recommendation
 
-    # --------------------------------------------------------
-    # 3. Fallback to recommendation database field
-    # --------------------------------------------------------
-
     recommendation_field = (
-        review.get(
-            "recommendation"
-        )
+        review.get("recommendation")
+        if review
+        else None
     )
 
     if recommendation_field:
@@ -460,13 +537,19 @@ def extract_ai_recommendation(
 
 def extract_recommendation_from_text(text):
     """
-    Extract the value immediately following:
+    Extract recommendation from formats such as:
 
         AI RECOMMENDATION:
-
         RETURN FOR CLARIFICATION
 
-    The comparison is case-insensitive.
+    or:
+
+        **AI RECOMMENDATION:** RETURN FOR CLARIFICATION
+
+    or:
+
+        ### AI RECOMMENDATION:
+        RETURN FOR CLARIFICATION
     """
 
     if not text:
@@ -481,68 +564,56 @@ def extract_recommendation_from_text(text):
         if not cleaned:
             continue
 
-        normalized = cleaned.upper()
+        normalized = normalize_heading(cleaned)
 
-        # Format:
-        #
-        # AI RECOMMENDATION:
-        # RETURN FOR CLARIFICATION
+        # Heading on its own line.
+        if normalized in (
+            "AI RECOMMENDATION:",
+            "AI RECOMMENDATION",
+        ):
 
-        if normalized == "AI RECOMMENDATION:":
-
-            for next_line in lines[
-                index + 1:
-            ]:
+            for next_line in lines[index + 1:]:
 
                 value = next_line.strip()
+
+                if not value:
+                    continue
+
+                value_normalized = normalize_heading(
+                    value
+                )
+
+                if value_normalized.endswith(":") and (
+                    "EXECUTIVE SUMMARY" in value_normalized
+                    or "COMPLIANCE ASSESSMENT" in value_normalized
+                    or "FINANCIAL ASSESSMENT" in value_normalized
+                    or "RISK ASSESSMENT" in value_normalized
+                ):
+                    break
+
+                value = value.replace("**", "").strip()
 
                 if value:
                     return value
 
-        # Also support:
-        #
-        # AI RECOMMENDATION: RETURN FOR CLARIFICATION
+        # Same-line format.
+        match = re.match(
+            r"^\s*(?:#+\s*)?(?:\*\*)?"
+            r"AI\s+RECOMMENDATION"
+            r"(?:\*\*)?\s*:?\s*"
+            r"(?:\*\*)?\s*(.+?)\s*(?:\*\*)?\s*$",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
 
-        elif normalized.startswith(
-            "AI RECOMMENDATION:"
-        ):
+        if match:
 
-            value = cleaned.split(
-                ":",
-                1,
-            )[1].strip()
+            value = match.group(1).strip()
 
             if value:
                 return value
 
     return None
-
-
-def extract_synthesis_section(
-    synthesis_result,
-    section_name,
-):
-    """
-    Extract a named section from structured synthesis.
-    """
-
-    if not synthesis_result:
-        return ""
-
-    if not isinstance(
-        synthesis_result,
-        dict,
-    ):
-        return ""
-
-    value = synthesis_result.get(
-        section_name
-    )
-
-    if value is None:
-        return ""
-
-    return value
 
 
 def extract_plain_text_section(
@@ -551,15 +622,8 @@ def extract_plain_text_section(
     next_headings=None,
 ):
     """
-    Extract a section from the current plain-text
+    Extract a section from plain-text or Markdown
     Decision Synthesizer output.
-
-    Example:
-
-        EXECUTIVE SUMMARY:
-        ...
-
-    until the next recognized heading.
     """
 
     if not text:
@@ -570,76 +634,60 @@ def extract_plain_text_section(
 
     lines = str(text).splitlines()
 
-    target = heading.strip().upper()
+    target = normalize_heading(heading)
 
     start_index = None
 
     for index, line in enumerate(lines):
 
-        cleaned = line.strip()
+        if normalize_heading(line) == target:
 
-        if cleaned.upper() == target:
             start_index = index + 1
             break
 
     if start_index is None:
         return ""
 
-    collected = []
-
-    normalized_next_headings = [
-        item.strip().upper()
+    normalized_next_headings = {
+        normalize_heading(item)
         for item in next_headings
-    ]
+    }
+
+    collected = []
 
     for line in lines[start_index:]:
 
         cleaned = line.strip()
 
         if (
-            cleaned.upper()
+            cleaned
+            and normalize_heading(cleaned)
             in normalized_next_headings
         ):
             break
 
         collected.append(line)
 
-    while (
-        collected
-        and not collected[0].strip()
-    ):
+    while collected and not collected[0].strip():
         collected.pop(0)
 
-    while (
-        collected
-        and not collected[-1].strip()
-    ):
+    while collected and not collected[-1].strip():
         collected.pop()
 
-    return "\n".join(
-        collected
-    ).strip()
+    return "\n".join(collected).strip()
 
 
-def get_synthesis_text(
-    synthesis_result,
-):
+def get_synthesis_text(synthesis_result):
     """
-    Return the complete plain-text synthesis
-    when present.
+    Return complete synthesis text when available.
     """
 
     if not synthesis_result:
         return ""
 
-    if isinstance(
-        synthesis_result,
-        dict,
-    ):
+    if isinstance(synthesis_result, dict):
 
-        text = synthesis_result.get(
-            "text"
-        )
+        text = synthesis_result.get("text")
 
         if text:
             return safe_text(
@@ -647,9 +695,7 @@ def get_synthesis_text(
                 "",
             )
 
-    return result_text(
-        synthesis_result
-    )
+    return result_text(synthesis_result)
 
 
 def get_synthesis_section(
@@ -658,49 +704,31 @@ def get_synthesis_section(
     next_headings,
 ):
     """
-    Read a synthesis section from either structured
-    data or the current plain-text database format.
+    Read synthesis section from structured JSON or
+    plain-text/Markdown synthesis.
     """
 
     structured_key_map = {
-        "EXECUTIVE SUMMARY:":
-            "executive_summary",
-
-        "COMPLIANCE ASSESSMENT:":
-            "compliance_assessment",
-
-        "FINANCIAL ASSESSMENT:":
-            "financial_assessment",
-
-        "RISK ASSESSMENT:":
-            "risk_assessment",
-
-        "KEY FINDINGS:":
-            "key_findings",
-
+        "EXECUTIVE SUMMARY:": "executive_summary",
+        "COMPLIANCE ASSESSMENT:": "compliance_assessment",
+        "FINANCIAL ASSESSMENT:": "financial_assessment",
+        "RISK ASSESSMENT:": "risk_assessment",
+        "KEY FINDINGS:": "key_findings",
         "MISSING OR UNCLEAR INFORMATION:":
             "missing_or_unclear_information",
-
         "CRITICAL POLICY / CONTROL ISSUES:":
             "critical_policy_control_issues",
-
         "CRITICAL POLICY / CONTROL ISSUES":
             "critical_policy_control_issues",
-
         "RECOMMENDATION REASON:":
             "recommendation_reason",
-
         "REQUIRED ACTIONS BEFORE FINAL DECISION:":
             "required_actions_before_final_decision",
-
         "HUMAN REVIEW REQUIRED:":
             "human_review_required",
     }
 
-    if isinstance(
-        synthesis_result,
-        dict,
-    ):
+    if isinstance(synthesis_result, dict):
 
         structured_key = (
             structured_key_map.get(
@@ -714,8 +742,32 @@ def get_synthesis_section(
                 structured_key
             )
 
-            if value is not None:
+            if has_value(value):
+
+                if isinstance(value, (dict, list)):
+                    return result_text(value)
+
                 return value
+
+        # Case-insensitive fallback for structured keys.
+        target_key = (
+            structured_key
+            if structured_key
+            else section_heading
+        )
+
+        for key, value in synthesis_result.items():
+
+            if str(key).strip().lower() == (
+                target_key.strip().lower()
+            ):
+
+                if has_value(value):
+
+                    if isinstance(value, (dict, list)):
+                        return result_text(value)
+
+                    return value
 
     text = get_synthesis_text(
         synthesis_result
@@ -730,28 +782,18 @@ def get_synthesis_section(
 
 def display_multiline_text(text):
     """
-    Render newline-separated AI content
-    cleanly in Streamlit.
+    Render newline-separated AI content cleanly.
     """
 
     if text is None:
-        st.write(
-            "No assessment available."
-        )
+        st.write("No assessment available.")
         return
 
-    if isinstance(
-        text,
-        (dict, list),
-    ):
-        text = result_text(
-            text
-        )
+    if isinstance(text, (dict, list)):
+        text = result_text(text)
 
     if not text:
-        st.write(
-            "No assessment available."
-        )
+        st.write("No assessment available.")
         return
 
     for line in str(text).splitlines():
@@ -816,18 +858,10 @@ def add_pdf_text(
     if text is None:
         return
 
-    if isinstance(
-        text,
-        dict,
-    ):
-        text = result_text(
-            text
-        )
+    if isinstance(text, dict):
+        text = result_text(text)
 
-    if isinstance(
-        text,
-        list,
-    ):
+    if isinstance(text, list):
 
         for index, item in enumerate(
             text,
@@ -897,9 +931,7 @@ def add_pdf_text(
 
 with st.sidebar:
 
-    st.markdown(
-        "## 🛡️ AegisAI"
-    )
+    st.markdown("## 🛡️ AegisAI")
 
     st.caption(
         "Approval & Compliance System"
@@ -907,15 +939,12 @@ with st.sidebar:
 
     st.markdown("---")
 
-    st.markdown(
-        "### Navigation"
-    )
+    st.markdown("### Navigation")
 
     if st.button(
         "Dashboard",
         use_container_width=True,
     ):
-
         st.switch_page(
             "pages/1_Dashboard.py"
         )
@@ -924,7 +953,6 @@ with st.sidebar:
         "Create Approval Case",
         use_container_width=True,
     ):
-
         st.switch_page(
             "pages/2_Create_Case.py"
         )
@@ -933,7 +961,6 @@ with st.sidebar:
         "Case Review",
         use_container_width=True,
     ):
-
         st.switch_page(
             "pages/3_Case_Review.py"
         )
@@ -942,7 +969,6 @@ with st.sidebar:
         "Decision",
         use_container_width=True,
     ):
-
         st.switch_page(
             "pages/4_Decision.py"
         )
@@ -951,7 +977,6 @@ with st.sidebar:
         "Case History",
         use_container_width=True,
     ):
-
         st.switch_page(
             "pages/5_Case_History.py"
         )
@@ -961,7 +986,6 @@ with st.sidebar:
         use_container_width=True,
         type="primary",
     ):
-
         st.rerun()
 
     st.markdown("---")
@@ -976,9 +1000,7 @@ with st.sidebar:
             None,
         )
 
-        st.switch_page(
-            "app.py"
-        )
+        st.switch_page("app.py")
 
 
 # ============================================================
@@ -1034,10 +1056,7 @@ try:
         .execute()
     )
 
-    cases = (
-        cases_response.data
-        or []
-    )
+    cases = cases_response.data or []
 
 except Exception as exc:
 
@@ -1077,9 +1096,7 @@ for case_item in cases:
         )
     )
 
-    case_id_value = case_item.get(
-        "id"
-    )
+    case_id_value = case_item.get("id")
 
     label = (
         f"{title} — "
@@ -1095,17 +1112,13 @@ selected_label = st.selectbox(
     list(case_options.keys()),
 )
 
-case = case_options[
-    selected_label
-]
+case = case_options[selected_label]
 
-case_id = get_case_id(
-    case
-)
+case_id = get_case_id(case)
 
 
 # ============================================================
-# LOAD LATEST AI REVIEW FOR SELECTED CASE ONLY
+# LOAD ALL AI REVIEWS FOR SELECTED CASE
 # ============================================================
 
 try:
@@ -1122,14 +1135,10 @@ try:
             "created_at",
             desc=True,
         )
-        .limit(1)
         .execute()
     )
 
-    reviews = (
-        review_response.data
-        or []
-    )
+    reviews = review_response.data or []
 
 except Exception as exc:
 
@@ -1140,50 +1149,14 @@ except Exception as exc:
     st.stop()
 
 
-review = (
-    reviews[0]
-    if reviews
-    else None
-)
-
-
-# ============================================================
-# TEMPORARY DEBUG
-# REMOVE AFTER REPORT ISSUE IS CONFIRMED FIXED
-# ============================================================
-
-if review:
-
-    st.write(
-        "DEBUG — AI Review Fields"
-    )
-
-    st.json(
-        {
-            "id": review.get("id"),
-            "case_id": review.get("case_id"),
-            "compliance_result": review.get(
-                "compliance_result"
-            ),
-            "financial_result": review.get(
-                "financial_result"
-            ),
-            "risk_result": review.get(
-                "risk_result"
-            ),
-            "synthesis": review.get(
-                "synthesis"
-            ),
-            "recommendation": review.get(
-                "recommendation"
-            ),
-        }
-    )
+# IMPORTANT:
+# Merge all rows so the report can retrieve the newest
+# non-empty result for each AI stage.
+review = merge_ai_review_rows(reviews)
 
 
 # ============================================================
 # LOAD WORKFLOW CHECKPOINTS
-# FOR SELECTED CASE ONLY
 # ============================================================
 
 try:
@@ -1202,10 +1175,7 @@ try:
         .execute()
     )
 
-    steps = (
-        steps_response.data
-        or []
-    )
+    steps = steps_response.data or []
 
 except Exception as exc:
 
@@ -1219,7 +1189,6 @@ except Exception as exc:
 
 # ============================================================
 # LOAD HUMAN DECISION
-# FOR SELECTED CASE ONLY
 # ============================================================
 
 try:
@@ -1240,10 +1209,7 @@ try:
         .execute()
     )
 
-    decisions = (
-        decision_response.data
-        or []
-    )
+    decisions = decision_response.data or []
 
 except Exception as exc:
 
@@ -1263,7 +1229,6 @@ decision = (
 
 # ============================================================
 # LOAD AUDIT TRAIL
-# FOR SELECTED CASE ONLY
 # ============================================================
 
 try:
@@ -1283,10 +1248,7 @@ try:
         .execute()
     )
 
-    audit_logs = (
-        audit_response.data
-        or []
-    )
+    audit_logs = audit_response.data or []
 
 except Exception as exc:
 
@@ -1312,58 +1274,38 @@ synthesis_result = {}
 if review:
 
     requirements = parse_json(
-        review.get(
-            "requirements"
-        ),
+        review.get("requirements"),
         [],
     )
 
-    if not isinstance(
-        requirements,
-        list,
-    ):
-
+    if not isinstance(requirements, list):
         requirements = []
 
     evidence_gate = parse_json(
-        review.get(
-            "evidence_gate"
-        ),
+        review.get("evidence_gate"),
         {},
     )
 
-    if not isinstance(
-        evidence_gate,
-        dict,
-    ):
-
+    if not isinstance(evidence_gate, dict):
         evidence_gate = {}
 
-    compliance_result = (
-        extract_assessment(
-            review,
-            "compliance",
-        )
+    compliance_result = extract_assessment(
+        review,
+        "compliance",
     )
 
-    financial_result = (
-        extract_assessment(
-            review,
-            "financial",
-        )
+    financial_result = extract_assessment(
+        review,
+        "financial",
     )
 
-    risk_result = (
-        extract_assessment(
-            review,
-            "risk",
-        )
+    risk_result = extract_assessment(
+        review,
+        "risk",
     )
 
-    synthesis_result = (
-        extract_synthesis(
-            review
-        )
+    synthesis_result = extract_synthesis(
+        review
     )
 
 
@@ -1373,9 +1315,7 @@ if review:
 
 st.markdown("---")
 
-st.subheader(
-    "Case Information"
-)
+st.subheader("Case Information")
 
 case_col1, case_col2, case_col3, case_col4 = (
     st.columns(4)
@@ -1436,9 +1376,7 @@ st.write(
 
 st.markdown("---")
 
-st.subheader(
-    "Evidence Gate"
-)
+st.subheader("Evidence Gate")
 
 gate_complete = bool(
     evidence_gate.get(
@@ -1447,44 +1385,29 @@ gate_complete = bool(
     )
 )
 
-missing_requirements = (
-    evidence_gate.get(
-        "missing",
-        [],
-    )
+missing_requirements = evidence_gate.get(
+    "missing",
+    [],
 )
 
 if not isinstance(
     missing_requirements,
     list,
 ):
-
     missing_requirements = []
 
 if gate_complete:
-
-    st.success(
-        "Status: PASSED"
-    )
-
+    st.success("Status: PASSED")
 else:
-
-    st.error(
-        "Status: INCOMPLETE"
-    )
+    st.error("Status: INCOMPLETE")
 
 if missing_requirements:
 
-    st.markdown(
-        "### Missing Requirements"
-    )
+    st.markdown("### Missing Requirements")
 
     for item in missing_requirements:
 
-        if isinstance(
-            item,
-            dict,
-        ):
+        if isinstance(item, dict):
 
             st.write(
                 f"• "
@@ -1504,9 +1427,7 @@ if missing_requirements:
 
 st.markdown("---")
 
-st.subheader(
-    "Policy-Driven Requirements"
-)
+st.subheader("Policy-Driven Requirements")
 
 if requirements:
 
@@ -1519,16 +1440,12 @@ if requirements:
             continue
 
         name = safe_text(
-            requirement.get(
-                "name"
-            ),
+            requirement.get("name"),
             "Requirement",
         )
 
         status = safe_text(
-            requirement.get(
-                "status"
-            ),
+            requirement.get("status"),
             "UNKNOWN",
         ).upper()
 
@@ -1542,21 +1459,15 @@ if requirements:
         )
 
         reason = safe_text(
-            requirement.get(
-                "reason"
-            )
+            requirement.get("reason")
         )
 
         evidence_rule = safe_text(
-            requirement.get(
-                "evidence_rule"
-            )
+            requirement.get("evidence_rule")
         )
 
-        minimum_count = (
-            requirement.get(
-                "minimum_count"
-            )
+        minimum_count = requirement.get(
+            "minimum_count"
         )
 
         minimum_text = ""
@@ -1598,9 +1509,7 @@ else:
 
 st.markdown("---")
 
-st.subheader(
-    "AI Assessment"
-)
+st.subheader("AI Assessment")
 
 if not review:
 
@@ -1615,11 +1524,9 @@ else:
     # AI RECOMMENDATION
     # --------------------------------------------------------
 
-    recommendation = (
-        extract_ai_recommendation(
-            review,
-            synthesis_result,
-        )
+    recommendation = extract_ai_recommendation(
+        review,
+        synthesis_result,
     )
 
     st.markdown(
@@ -1631,21 +1538,17 @@ else:
     # EXECUTIVE SUMMARY
     # --------------------------------------------------------
 
-    st.markdown(
-        "### Executive Summary"
-    )
+    st.markdown("### Executive Summary")
 
-    executive_summary = (
-        get_synthesis_section(
-            synthesis_result,
-            "EXECUTIVE SUMMARY:",
-            [
-                "COMPLIANCE ASSESSMENT:",
-                "FINANCIAL ASSESSMENT:",
-                "RISK ASSESSMENT:",
-                "KEY FINDINGS:",
-            ],
-        )
+    executive_summary = get_synthesis_section(
+        synthesis_result,
+        "EXECUTIVE SUMMARY:",
+        [
+            "COMPLIANCE ASSESSMENT:",
+            "FINANCIAL ASSESSMENT:",
+            "RISK ASSESSMENT:",
+            "KEY FINDINGS:",
+        ],
     )
 
     if executive_summary:
@@ -1665,42 +1568,42 @@ else:
     # COMPLIANCE
     # --------------------------------------------------------
 
-    st.markdown(
-        "### Compliance Assessment"
+    st.markdown("### Compliance Assessment")
+
+    compliance_text = result_text(
+        compliance_result
     )
 
     display_multiline_text(
-        result_text(
-            compliance_result
-        )
+        compliance_text
     )
 
     # --------------------------------------------------------
     # FINANCIAL
     # --------------------------------------------------------
 
-    st.markdown(
-        "### Financial Assessment"
+    st.markdown("### Financial Assessment")
+
+    financial_text = result_text(
+        financial_result
     )
 
     display_multiline_text(
-        result_text(
-            financial_result
-        )
+        financial_text
     )
 
     # --------------------------------------------------------
     # RISK
     # --------------------------------------------------------
 
-    st.markdown(
-        "### Risk Assessment"
+    st.markdown("### Risk Assessment")
+
+    risk_text = result_text(
+        risk_result
     )
 
     display_multiline_text(
-        result_text(
-            risk_result
-        )
+        risk_text
     )
 
     # --------------------------------------------------------
@@ -1768,20 +1671,16 @@ else:
         if section_title in rendered_titles:
             continue
 
-        section_value = (
-            get_synthesis_section(
-                synthesis_result,
-                section_heading,
-                next_headings,
-            )
+        section_value = get_synthesis_section(
+            synthesis_result,
+            section_heading,
+            next_headings,
         )
 
         if not section_value:
             continue
 
-        rendered_titles.add(
-            section_title
-        )
+        rendered_titles.add(section_title)
 
         st.markdown(
             f"### {section_title}"
@@ -1808,15 +1707,10 @@ else:
             )
         )
 
-        if (
-            human_review_required
-            is None
-        ):
+        if human_review_required is None:
 
             plain_text_value = (
-                synthesis_result.get(
-                    "text"
-                )
+                synthesis_result.get("text")
             )
 
             if plain_text_value:
@@ -1871,16 +1765,12 @@ else:
 
 st.markdown("---")
 
-st.subheader(
-    "Human Decision"
-)
+st.subheader("Human Decision")
 
 if decision:
 
     decision_value = safe_text(
-        decision.get(
-            "decision"
-        ),
+        decision.get("decision"),
         "N/A",
     )
 
@@ -1894,9 +1784,7 @@ if decision:
         f"{format_timestamp(decision.get('created_at'))}"
     )
 
-    comments = decision.get(
-        "comments"
-    )
+    comments = decision.get("comments")
 
     if comments:
 
@@ -1919,9 +1807,7 @@ else:
 
 st.markdown("---")
 
-st.subheader(
-    "AI Workflow Checkpoints"
-)
+st.subheader("AI Workflow Checkpoints")
 
 if steps:
 
@@ -1932,24 +1818,16 @@ if steps:
         workflow_rows.append(
             [
                 safe_text(
-                    step.get(
-                        "step_name"
-                    )
+                    step.get("step_name")
                 ),
                 safe_text(
-                    step.get(
-                        "status"
-                    )
+                    step.get("status")
                 ).upper(),
                 safe_text(
-                    step.get(
-                        "provider"
-                    )
+                    step.get("provider")
                 ),
                 safe_text(
-                    step.get(
-                        "model"
-                    )
+                    step.get("model")
                 ),
             ]
         )
@@ -1989,38 +1867,28 @@ else:
 
 st.markdown("---")
 
-st.subheader(
-    "Audit Trail"
-)
+st.subheader("Audit Trail")
 
 if audit_logs:
 
     for log in audit_logs:
 
         timestamp = format_timestamp(
-            log.get(
-                "created_at"
-            )
+            log.get("created_at")
         )
 
         action = safe_text(
-            log.get(
-                "action"
-            ),
+            log.get("action"),
             "AUDIT_EVENT",
         )
 
         description = safe_text(
-            log.get(
-                "description"
-            ),
+            log.get("description"),
             "",
         )
 
         metadata = parse_json(
-            log.get(
-                "metadata"
-            ),
+            log.get("metadata"),
             {},
         )
 
@@ -2030,14 +1898,9 @@ if audit_logs:
         )
 
         if description:
+            line += f" — {description}"
 
-            line += (
-                f" — {description}"
-            )
-
-        st.markdown(
-            line
-        )
+        st.markdown(line)
 
         if metadata:
 
@@ -2061,8 +1924,8 @@ else:
 
 def generate_pdf():
     """
-    Generate a PDF using ONLY the currently selected case
-    and records loaded using that case_id.
+    Generate a PDF using the currently selected case
+    and merged AI results for that case.
     """
 
     buffer = BytesIO()
@@ -2185,9 +2048,7 @@ def generate_pdf():
             ),
             Paragraph(
                 pdf_escape(
-                    case.get(
-                        "title"
-                    )
+                    case.get("title")
                 ),
                 body_style,
             ),
@@ -2200,9 +2061,7 @@ def generate_pdf():
             ),
             Paragraph(
                 pdf_escape(
-                    case.get(
-                        "department"
-                    )
+                    case.get("department")
                 ),
                 body_style,
             ),
@@ -2234,9 +2093,7 @@ def generate_pdf():
             Paragraph(
                 pdf_escape(
                     safe_text(
-                        case.get(
-                            "status"
-                        )
+                        case.get("status")
                     ).upper()
                 ),
                 body_style,
@@ -2251,9 +2108,7 @@ def generate_pdf():
             Paragraph(
                 pdf_escape(
                     format_timestamp(
-                        case.get(
-                            "created_at"
-                        )
+                        case.get("created_at")
                     )
                 ),
                 body_style,
@@ -2319,9 +2174,7 @@ def generate_pdf():
         )
     )
 
-    story.append(
-        case_table
-    )
+    story.append(case_table)
 
     # ========================================================
     # EVIDENCE GATE
@@ -2363,22 +2216,15 @@ def generate_pdf():
 
         for item in missing_requirements:
 
-            if isinstance(
-                item,
-                dict,
-            ):
+            if isinstance(item, dict):
 
                 text = safe_text(
-                    item.get(
-                        "name"
-                    )
+                    item.get("name")
                 )
 
             else:
 
-                text = safe_text(
-                    item
-                )
+                text = safe_text(item)
 
             story.append(
                 Paragraph(
@@ -2411,16 +2257,12 @@ def generate_pdf():
                 continue
 
             name = safe_text(
-                requirement.get(
-                    "name"
-                ),
+                requirement.get("name"),
                 "Requirement",
             )
 
             status = safe_text(
-                requirement.get(
-                    "status"
-                ),
+                requirement.get("status"),
                 "UNKNOWN",
             ).upper()
 
@@ -2434,21 +2276,15 @@ def generate_pdf():
             )
 
             reason = safe_text(
-                requirement.get(
-                    "reason"
-                )
+                requirement.get("reason")
             )
 
             evidence_rule = safe_text(
-                requirement.get(
-                    "evidence_rule"
-                )
+                requirement.get("evidence_rule")
             )
 
-            minimum_count = (
-                requirement.get(
-                    "minimum_count"
-                )
+            minimum_count = requirement.get(
+                "minimum_count"
             )
 
             minimum_text = ""
@@ -2603,7 +2439,7 @@ def generate_pdf():
             )
 
         # ----------------------------------------------------
-        # COMPLIANCE AGENT
+        # COMPLIANCE
         # ----------------------------------------------------
 
         story.append(
@@ -2622,7 +2458,7 @@ def generate_pdf():
         )
 
         # ----------------------------------------------------
-        # FINANCIAL AGENT
+        # FINANCIAL
         # ----------------------------------------------------
 
         story.append(
@@ -2641,7 +2477,7 @@ def generate_pdf():
         )
 
         # ----------------------------------------------------
-        # RISK AGENT
+        # RISK
         # ----------------------------------------------------
 
         story.append(
@@ -2741,9 +2577,7 @@ def generate_pdf():
 
             story.append(
                 Paragraph(
-                    escape(
-                        section_title
-                    ),
+                    escape(section_title),
                     subsection_style,
                 )
             )
@@ -2771,15 +2605,10 @@ def generate_pdf():
                 )
             )
 
-            if (
-                human_review_required
-                is None
-            ):
+            if human_review_required is None:
 
                 plain_text_value = (
-                    synthesis_result.get(
-                        "text"
-                    )
+                    synthesis_result.get("text")
                 )
 
                 if plain_text_value:
@@ -2845,9 +2674,7 @@ def generate_pdf():
     if decision:
 
         decision_value = safe_text(
-            decision.get(
-                "decision"
-            ),
+            decision.get("decision"),
             "N/A",
         )
 
@@ -2871,9 +2698,7 @@ def generate_pdf():
             )
         )
 
-        comments = decision.get(
-            "comments"
-        )
+        comments = decision.get("comments")
 
         if comments:
 
@@ -2939,9 +2764,7 @@ def generate_pdf():
                 [
                     Paragraph(
                         pdf_escape(
-                            step.get(
-                                "step_name"
-                            )
+                            step.get("step_name")
                         ),
                         small_style,
                     ),
@@ -2949,9 +2772,7 @@ def generate_pdf():
                     Paragraph(
                         pdf_escape(
                             safe_text(
-                                step.get(
-                                    "status"
-                                )
+                                step.get("status")
                             ).upper()
                         ),
                         small_style,
@@ -2959,18 +2780,14 @@ def generate_pdf():
 
                     Paragraph(
                         pdf_escape(
-                            step.get(
-                                "provider"
-                            )
+                            step.get("provider")
                         ),
                         small_style,
                     ),
 
                     Paragraph(
                         pdf_escape(
-                            step.get(
-                                "model"
-                            )
+                            step.get("model")
                         ),
                         small_style,
                     ),
@@ -3069,22 +2886,16 @@ def generate_pdf():
         for log in audit_logs:
 
             timestamp = format_timestamp(
-                log.get(
-                    "created_at"
-                )
+                log.get("created_at")
             )
 
             action = safe_text(
-                log.get(
-                    "action"
-                ),
+                log.get("action"),
                 "AUDIT_EVENT",
             )
 
             description = safe_text(
-                log.get(
-                    "description"
-                ),
+                log.get("description"),
                 "",
             )
 
@@ -3105,17 +2916,13 @@ def generate_pdf():
 
                 story.append(
                     Paragraph(
-                        pdf_escape(
-                            description
-                        ),
+                        pdf_escape(description),
                         small_style,
                     )
                 )
 
             metadata = parse_json(
-                log.get(
-                    "metadata"
-                ),
+                log.get("metadata"),
                 {},
             )
 
@@ -3175,9 +2982,7 @@ def generate_pdf():
     # BUILD PDF
     # ========================================================
 
-    document.build(
-        story
-    )
+    document.build(story)
 
     buffer.seek(0)
 
@@ -3190,9 +2995,7 @@ def generate_pdf():
 
 st.markdown("---")
 
-st.subheader(
-    "Download Report"
-)
+st.subheader("Download Report")
 
 if review:
 
