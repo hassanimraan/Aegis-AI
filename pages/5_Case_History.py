@@ -290,10 +290,16 @@ for case in cases:
     # -----------------------------------------------------
     # Case Header
     # -----------------------------------------------------
-    with st.expander(f"{case.get('title', 'Untitled Case')} — {amount_display}", expanded=False):
+    with st.expander(
+        f"{case.get('title', 'Untitled Case')} — "
+        f"{amount_display} — "
+        f"Case #{case_id}",
+        expanded=False,
+    ):
         col1, col2, col3 = st.columns(3)
 
         with col1:
+            st.write(f"**Case ID:** {case_id}")
             st.write(f"**Department:** {case.get('department', 'N/A')}")
 
         with col2:
