@@ -953,7 +953,17 @@ review = (
     if reviews
     else None
 )
-
+if review:
+    st.write("DEBUG — AI Review Fields")
+    st.json({
+        "id": review.get("id"),
+        "case_id": review.get("case_id"),
+        "compliance_result": review.get("compliance_result"),
+        "financial_result": review.get("financial_result"),
+        "risk_result": review.get("risk_result"),
+        "synthesis": review.get("synthesis"),
+        "recommendation": review.get("recommendation"),
+    })
 
 # ============================================================
 # LOAD WORKFLOW CHECKPOINTS
