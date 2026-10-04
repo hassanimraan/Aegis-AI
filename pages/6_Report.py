@@ -3063,22 +3063,3 @@ with nav_col2:
         st.switch_page(
             "pages/1_Dashboard.py"
         )
-```
-
-### Do this now
-
-1. Open `pages/6_Report.py`.
-2. **Select All → Delete.**
-3. Paste the complete code above.
-4. Save.
-5. Run/refresh the Streamlit app.
-6. Open **Reports → Case #12**.
-
-The debug JSON has also been removed.
-
-For Case #12, the four AI sections should now contain the actual stored AI text rather than:
-
-* `No separate executive summary was recorded.`
-* `No assessment available.`
-
-Your **Evidence Gate, Human Decision, Workflow Checkpoints, Audit Trail, and PDF generation remain included**.
